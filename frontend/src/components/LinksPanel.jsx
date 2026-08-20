@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Globe, Lock, LogOut, Plus, Trash2, Unlock } from "lucide-react";
+import { Check, Copy, Globe, Home, Lock, LogOut, Plus, Trash2, Unlock, User } from "lucide-react";
 import PasswordField from "./PasswordField.jsx";
 import { authFetch, clearSession } from "../lib/session.js";
 
@@ -230,9 +230,11 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
 
         <div className="topbar-actions">
           <button className="ghost-button" onClick={() => onNavigate("/conta")}>
+            <User size={16} />
             Minha conta
           </button>
           <button className="ghost-button" onClick={() => onNavigate("/")}>
+            <Home size={16} />
             Ir para entrada
           </button>
           <button className="ghost-button" onClick={logout}>

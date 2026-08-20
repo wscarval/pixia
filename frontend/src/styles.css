@@ -1045,6 +1045,7 @@ button {
 
 .device-select {
   height: 48px;
+  min-width: 110px;
   max-width: 150px;
   padding: 0 10px;
   border: 0;
@@ -1525,6 +1526,7 @@ button {
   }
 
   .device-select {
+    min-width: 0;
     max-width: 84px;
     padding-inline: 6px;
   }

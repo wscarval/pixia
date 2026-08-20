@@ -37,6 +37,15 @@ const TURN_SECRET = process.env.TURN_SECRET;
 const TURN_URL = process.env.TURN_URL;
 const TURN_TTL_SECONDS = 3600;
 
+// Manda UDP e TCP pro mesmo host:porta, não só UDP. Rede restritiva de
+// verdade (corporativa, algumas de operadora móvel) costuma bloquear UDP de
+// saída inteiro mas deixa passar TCP — sem essa segunda opção, quem estiver
+// numa rede assim nunca consegue nem tentar o TURN, só falha direto.
+function turnUrlVariants(baseUrl) {
+  const withoutQuery = baseUrl.split("?")[0];
+  return [`${withoutQuery}?transport=udp`, `${withoutQuery}?transport=tcp`];
+}
+
 // Credencial de TURN de curta duração (esquema "REST API" do coturn: usuário
 // é o timestamp de expiração, senha é HMAC-SHA1 disso com um segredo
 // compartilhado só entre backend e coturn). Em vez de uma credencial fixa
@@ -51,7 +60,13 @@ app.get("/api/turn-credentials", (_req, res) => {
   const username = String(expiry);
   const credential = crypto.createHmac("sha1", TURN_SECRET).update(username).digest("base64");
 
-  res.json({ ok: true, urls: TURN_URL, username, credential, ttl: TURN_TTL_SECONDS });
+  res.json({
+    ok: true,
+    urls: turnUrlVariants(TURN_URL),
+    username,
+    credential,
+    ttl: TURN_TTL_SECONDS,
+  });
 });
 
 // Sem CORS_ORIGIN configurado, fecha por padrão (nenhuma origem cruzada

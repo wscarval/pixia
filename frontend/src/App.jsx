@@ -562,7 +562,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     () => [
       {
         id: "self",
-        name: `${name} (você)`,
+        name,
         avatarId: myAvatarId,
         micEnabled,
         screenSharing,
@@ -736,6 +736,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                     <div className="participant-copy">
                       <strong>{participant.name}</strong>
                       <span>
+                        {isSelf ? "Você · " : ""}
                         {participant.micEnabled ? "Microfone ativo" : "Microfone desligado"}
                       </span>
                     </div>

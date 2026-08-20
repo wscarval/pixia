@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { User } from "lucide-react";
+import { Link2, User } from "lucide-react";
 import PasswordField from "./PasswordField.jsx";
 import { authFetch, updateStoredUser } from "../lib/session.js";
 
@@ -144,6 +144,7 @@ export default function Account({ user, onNavigate, onUserUpdated }) {
 
         <div className="topbar-actions">
           <button className="ghost-button" onClick={() => onNavigate("/painel")}>
+            <Link2 size={16} />
             Meus links
           </button>
         </div>

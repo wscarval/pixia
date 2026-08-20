@@ -2,8 +2,8 @@ import { Check, Download, Monitor } from "lucide-react";
 import AuthLayout from "./AuthLayout.jsx";
 import { isElectronDesktop } from "../lib/electronAppAudio.js";
 
-const INSTALLER_URL = "/downloads/Pixia-Setup-1.0.0.exe";
-const VERSION = "1.0.0";
+const INSTALLER_URL = "/downloads/Pixia-Setup-1.0.1.exe";
+const VERSION = "1.0.1";
 const SIZE_MB = "99 MB";
 
 export default function DownloadApp({ onNavigate }) {

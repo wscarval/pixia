@@ -54,13 +54,18 @@ Mas para uso real pela Internet o TURN precisa ser configurado com o IP/domínio
 A credencial de TURN não fica mais fixa no bundle do cliente (ficaria exposta pra sempre em texto puro no JS público). Em vez disso, `coturn/turnserver.conf` usa `use-auth-secret` e o backend gera uma credencial de curta duração (1h) por sessão em `GET /api/turn-credentials`, assinada com o mesmo segredo. Pra habilitar em produção:
 
 1. **Firewall do servidor** (fora do Docker, no firewall do provedor/VPS também): libere TCP e UDP na porta `3478`, e UDP no intervalo `49160-49200` (portas de relay, uma por chamada).
-2. Em `coturn/turnserver.conf`, troque `static-auth-secret` por um valor forte, e preencha `external-ip` com o **IP público real do servidor**. Sem isso, o coturn (rodando atrás do Docker/NAT) anuncia o IP interno do container nos candidatos de relay e o TURN não funciona pra ninguém de fora.
+2. Em `coturn/turnserver.conf`, troque `static-auth-secret` por um valor forte, e preencha `external-ip` com **`IP_PUBLICO/IP_INTERNO_DO_CONTAINER`** (os dois, separados por `/`). Só o IP público sozinho não basta atrás do NAT do Docker: o coturn continua anunciando o IP interno da rede do Compose nos candidatos de relay, e ninguém de fora consegue usar. Para achar o IP interno atual do container: `docker inspect webrtc-coturn --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'` (pode mudar se o container for recriado — nesse caso, atualize o valor e reinicie o coturn).
 3. No `.env`, defina `TURN_SECRET` com o **mesmo** valor do `static-auth-secret`, `TURN_URL` com o endereço público do coturn (ex: `turn:SEU_DOMINIO_OU_IP:3478?transport=udp`), e `VITE_TURN_ENABLED=true`.
 4. Suba com o profile `turn` e reconstrua (o `VITE_TURN_ENABLED` é build-time do frontend):
    ```bash
    docker compose --profile turn up --build -d
    ```
-5. Confirme: `curl https://seu-dominio/api/turn-credentials` deve devolver `{"ok":true,"urls":"...","username":"...","credential":"..."}`. Se vier `{"ok":false,"message":"TURN não configurado."}`, `TURN_SECRET`/`TURN_URL` não chegaram no container do backend — confira o `.env` e rode `docker compose up -d` de novo.
+   **O profile precisa ser repetido toda vez** que a stack for recriada (`docker compose up -d` sem `--profile turn` não sobe o coturn). Se em algum momento os participantes pararem de conseguir se conectar entre si, o primeiro passo é `docker ps` pra confirmar que o `webrtc-coturn` está `Up` — é comum ele simplesmente não ter subido numa atualização.
+5. Confirme que o coturn está de pé: `docker ps` deve listar `webrtc-coturn`. Depois, `curl https://seu-dominio/api/turn-credentials` deve devolver `{"ok":true,"urls":"...","username":"...","credential":"..."}` — mas atenção, essa resposta só confirma que o **backend** tem `TURN_SECRET`/`TURN_URL` configurados, não que o coturn está rodando nem que o segredo bate com o `static-auth-secret` dele. Pra testar de ponta a ponta de verdade, use o cliente de teste que já vem na imagem do coturn:
+   ```bash
+   docker exec webrtc-coturn turnutils_uclient -u USERNAME -w CREDENTIAL -p 3478 -y SEU_IP_INTERNO
+   ```
+   (usando o `username`/`credential` que saíram do curl acima, e o IP interno do passo 2). Se aparecer `success` e `Received relay addr: SEU_IP_PUBLICO:...`, está tudo certo. Um erro de autenticação ali normalmente é `TURN_SECRET` (.env) diferente de `static-auth-secret` (turnserver.conf).
 
 ## Arquitetura
 
