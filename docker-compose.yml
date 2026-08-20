@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: webrtc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-webrtc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webrtc}
+      POSTGRES_DB: ${POSTGRES_DB:-webrtc_meeting}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-webrtc} -d ${POSTGRES_DB:-webrtc_meeting}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - webrtc-network
+
+  backend:
+    build:
+      context: ./backend
+    container_name: webrtc-backend
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:-dev-change-this-secret}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-webrtc}:${POSTGRES_PASSWORD:-webrtc}@postgres:5432/${POSTGRES_DB:-webrtc_meeting}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    networks:
+      - webrtc-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_STUN_URL: ${VITE_STUN_URL:-stun:stun.cloudflare.com:3478}
+        VITE_TURN_ENABLED: ${VITE_TURN_ENABLED:-false}
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+    container_name: webrtc-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - webrtc-network
+
+  # Opcional no desenvolvimento local.
+  # Inicie com: docker compose --profile turn up --build
+  coturn:
+    image: coturn/coturn:4
+    container_name: webrtc-coturn
+    profiles: ["turn"]
+    restart: unless-stopped
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    networks:
+      - webrtc-network
+
+networks:
+  webrtc-network:
+    driver: bridge
+
+volumes:
+  postgres-data:

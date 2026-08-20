@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Escolher tela ou janela</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #0f0f13;
+        color: #f4f4f5;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        overflow: hidden;
+        user-select: none;
+      }
+
+      header {
+        padding: 18px 22px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      header p {
+        margin: 6px 0 0;
+        color: #8b8b95;
+        font-size: 12px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 6px;
+        padding: 12px 22px 0;
+      }
+
+      .tab {
+        padding: 7px 14px;
+        border-radius: 9px;
+        border: 0;
+        background: #18181d;
+        color: #a1a1aa;
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .tab.active {
+        background: #7c3aed;
+        color: white;
+      }
+
+      .grid {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 16px 22px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        align-content: start;
+      }
+
+      .source {
+        border: 2px solid transparent;
+        border-radius: 14px;
+        background: #18181d;
+        cursor: pointer;
+        padding: 0;
+        overflow: hidden;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+      }
+
+      .source:hover {
+        border-color: rgba(139, 92, 246, 0.5);
+      }
+
+      .source.selected {
+        border-color: #8b5cf6;
+      }
+
+      .thumb {
+        width: 100%;
+        height: 108px;
+        object-fit: contain;
+        background: #000;
+        display: block;
+      }
+
+      .source-name {
+        padding: 8px 10px;
+        font-size: 11.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .empty {
+        grid-column: 1 / -1;
+        text-align: center;
+        color: #71717a;
+        font-size: 12px;
+        padding: 40px 0;
+      }
+
+      footer {
+        padding: 14px 22px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      button.action {
+        border: 0;
+        border-radius: 11px;
+        padding: 9px 18px;
+        font-size: 12.5px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .cancel {
+        background: #18181d;
+        color: #d4d4d8;
+      }
+
+      .confirm {
+        background: #7c3aed;
+        color: white;
+      }
+
+      .confirm:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Escolher tela ou janela para compartilhar</h1>
+      <p>Selecione o que você quer mostrar na chamada.</p>
+    </header>
+
+    <div class="tabs">
+      <button class="tab active" data-type="screen">Telas</button>
+      <button class="tab" data-type="window">Janelas</button>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <footer>
+      <button class="action cancel" id="cancel">Cancelar</button>
+      <button class="action confirm" id="confirm" disabled>Compartilhar</button>
+    </footer>
+
+    <script>
+      let sources = [];
+      let activeType = "screen";
+      let selectedId = null;
+
+      const grid = document.getElementById("grid");
+      const confirmButton = document.getElementById("confirm");
+      const cancelButton = document.getElementById("cancel");
+      const tabs = document.querySelectorAll(".tab");
+
+      function render() {
+        const filtered = sources.filter((source) => source.type === activeType);
+        grid.innerHTML = "";
+
+        if (filtered.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "Nada encontrado aqui.";
+          grid.appendChild(empty);
+          return;
+        }
+
+        for (const source of filtered) {
+          const button = document.createElement("button");
+          button.className = "source" + (source.id === selectedId ? " selected" : "");
+          button.innerHTML = `
+            <img class="thumb" src="${source.thumbnail}" alt="" />
+            <div class="source-name">${source.name}</div>
+          `;
+          button.addEventListener("click", () => {
+            selectedId = source.id;
+            confirmButton.disabled = false;
+            render();
+          });
+          button.addEventListener("dblclick", () => {
+            selectedId = source.id;
+            window.electronPicker.select(selectedId);
+          });
+          grid.appendChild(button);
+        }
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          activeType = tab.dataset.type;
+          tabs.forEach((t) => t.classList.toggle("active", t === tab));
+          render();
+        });
+      });
+
+      confirmButton.addEventListener("click", () => {
+        if (selectedId) window.electronPicker.select(selectedId);
+      });
+
+      cancelButton.addEventListener("click", () => {
+        window.electronPicker.cancel();
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") window.electronPicker.cancel();
+      });
+
+      window.electronPicker.getSources().then((list) => {
+        sources = list;
+        if (!sources.some((source) => source.type === "screen")) {
+          activeType = "window";
+          tabs.forEach((t) => t.classList.toggle("active", t.dataset.type === "window"));
+        }
+        render();
+      });
+    </script>
+  </body>
+</html>

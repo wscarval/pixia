@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "users" ADD COLUMN "avatar_id" INTEGER NOT NULL DEFAULT 1;

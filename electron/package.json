@@ -1,0 +1,39 @@
+{
+  "name": "workroom-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pixia — cliente desktop (Electron) para pixiaart.com",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild-native": "node-gyp rebuild --directory native --target=43.4.1 --arch=x64 --dist-url=https://electronjs.org/headers",
+    "build:win": "electron-builder --win",
+    "clean": "node scripts/clean.js",
+    "reset": "npm run clean && npm install && npm run rebuild-native"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "node-gyp": "^11.1.0"
+  },
+  "build": {
+    "appId": "com.pixiaart.pixia",
+    "productName": "Pixia",
+    "asarUnpack": [
+      "native/build/Release/*.node"
+    ],
+    "files": [
+      "src/**/*",
+      "native/build/Release/*.node",
+      "!native/build/Release/obj*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    }
+  }
+}

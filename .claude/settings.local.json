@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(JWT_SECRET=test-secret PORT=3099 DATA_DIR=./data-test node src/server.js)",
+      "Bash(curl -s -X POST http://localhost:3099/api/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"William Teste\",\"email\":\"william@example.com\",\"password\":\"senha1234\"}')",
+      "Bash(curl -s -X POST http://localhost:3099/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"william@example.com\",\"password\":\"senha1234\"}')",
+      "Bash(curl -s -X POST http://localhost:3099/api/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"William\",\"email\":\"william@example.com\",\"password\":\"senha1234\"}')",
+      "Bash(curl -s -X POST http://localhost:3099/api/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"X\",\"email\":\"x@example.com\",\"password\":\"123\"}')",
+      "Bash(taskkill //F //PID 70084)",
+      "Bash(rm -rf ./data-test)",
+      "Bash(docker --version)"
+    ]
+  }
+}

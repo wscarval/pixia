@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  avatarId     Int      @default(1) @map("avatar_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  rooms        Room[]
+
+  @@map("users")
+}
+
+model Room {
+  id           String   @id @default(uuid())
+  slug         String   @unique
+  name         String?
+  passwordHash String?  @map("password_hash")
+  ownerId      String?  @map("owner_id")
+  owner        User?    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime? @map("expires_at")
+  creatorIp    String?  @map("creator_ip")
+  chatMessages ChatMessage[]
+
+  @@index([creatorIp])
+  @@map("rooms")
+}
+
+// Histórico de chat, salvo só para salas particulares (têm senha e dono
+// esperados) para não perder as mensagens quando alguém recarrega a página.
+model ChatMessage {
+  id        String   @id @default(uuid())
+  roomId    String   @map("room_id")
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userName  String   @map("user_name")
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([roomId, createdAt])
+  @@map("chat_messages")
+}
