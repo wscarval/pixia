@@ -14,7 +14,8 @@ Acesse:
 
 - Aplicação: http://localhost/ — escolha "Gerar sala pública aleatória" ou "Criar sala particular" (as salas são sempre criadas pelo servidor, não dá mais pra digitar um `/r/nome-qualquer` direto na URL).
 - Health do backend pelo Nginx: http://localhost/health
-- Backend direto: http://localhost:3001/health
+
+> O backend não publica mais a porta 3001 no host (só é alcançável pelo Nginx, via rede interna do Compose). Isso é proposital: expor a API direto puxava tudo que o Nginx (e a Cloudflare, em produção) filtram, incluindo o limite de salas por IP. Pra debugar direto no backend, use `docker compose exec backend sh` ou rode `docker compose logs -f backend`.
 
 Copie o link gerado e abra em outro navegador/perfil para simular um segundo participante, entrando com um nome diferente.
 
@@ -50,7 +51,16 @@ docker compose --profile turn up --build
 
 Mas para uso real pela Internet o TURN precisa ser configurado com o IP/domínio público correto, portas liberadas e credenciais seguras. O `turnserver.conf` incluído é apenas um ponto de partida de desenvolvimento.
 
-Para habilitar TURN no frontend, copie `.env.example` para `.env`, configure as variáveis `VITE_TURN_*` e reconstrua o frontend.
+A credencial de TURN não fica mais fixa no bundle do cliente (ficaria exposta pra sempre em texto puro no JS público). Em vez disso, `coturn/turnserver.conf` usa `use-auth-secret` e o backend gera uma credencial de curta duração (1h) por sessão em `GET /api/turn-credentials`, assinada com o mesmo segredo. Pra habilitar em produção:
+
+1. **Firewall do servidor** (fora do Docker, no firewall do provedor/VPS também): libere TCP e UDP na porta `3478`, e UDP no intervalo `49160-49200` (portas de relay, uma por chamada).
+2. Em `coturn/turnserver.conf`, troque `static-auth-secret` por um valor forte, e preencha `external-ip` com o **IP público real do servidor**. Sem isso, o coturn (rodando atrás do Docker/NAT) anuncia o IP interno do container nos candidatos de relay e o TURN não funciona pra ninguém de fora.
+3. No `.env`, defina `TURN_SECRET` com o **mesmo** valor do `static-auth-secret`, `TURN_URL` com o endereço público do coturn (ex: `turn:SEU_DOMINIO_OU_IP:3478?transport=udp`), e `VITE_TURN_ENABLED=true`.
+4. Suba com o profile `turn` e reconstrua (o `VITE_TURN_ENABLED` é build-time do frontend):
+   ```bash
+   docker compose --profile turn up --build -d
+   ```
+5. Confirme: `curl https://seu-dominio/api/turn-credentials` deve devolver `{"ok":true,"urls":"...","username":"...","credential":"..."}`. Se vier `{"ok":false,"message":"TURN não configurado."}`, `TURN_SECRET`/`TURN_URL` não chegaram no container do backend — confira o `.env` e rode `docker compose up -d` de novo.
 
 ## Arquitetura
 

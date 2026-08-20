@@ -42,6 +42,7 @@ import {
 } from "./lib/session.js";
 import { getStoredParticipantVolume, setStoredParticipantVolume } from "./lib/preferences.js";
 import { isElectronDesktop } from "./lib/electronAppAudio.js";
+import { randomGuestName } from "./lib/catNames.js";
 
 const AVATAR_PALETTE = [
   ["#8b5cf6", "#6d28d9"],
@@ -293,7 +294,12 @@ function Landing({ onNavigate, currentUser }) {
 }
 
 function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
-  const [name, setName] = useState(localStorage.getItem("webrtc-name") || "");
+  // Nome custom é privilégio de quem tem conta (e só muda em /conta). Quem
+  // não está logado entra com um nome de visitante sorteado, sem campo pra
+  // digitar nada — sorteado uma vez só, não muda a cada re-render.
+  const guestName = useMemo(() => randomGuestName(), []);
+  const displayName = currentUser?.name || guestName;
+
   const [password, setPassword] = useState("");
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [roomNotFound, setRoomNotFound] = useState(false);
@@ -349,13 +355,8 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
     event.preventDefault();
     setError("");
 
-    const cleanName = name.trim();
-    if (!cleanName) return;
-
-    localStorage.setItem("webrtc-name", cleanName);
-
     if (!requiresPassword) {
-      onJoin(cleanName);
+      onJoin(displayName);
       return;
     }
 
@@ -373,7 +374,7 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
         return;
       }
 
-      onJoin(cleanName, data.roomToken);
+      onJoin(displayName, data.roomToken);
     } catch {
       setError("Falha ao conectar ao servidor.");
     } finally {
@@ -388,7 +389,11 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
           <img src="/pixia.png" alt="Pixia" />
         </div>
         <h1>Entrar na conversa</h1>
-        <p className="muted">Digite seu nome para entrar nesta sala.</p>
+        <p className="muted">
+          {currentUser
+            ? "Confirme sua entrada nesta sala."
+            : "Você entra com um nome de visitante sorteado."}
+        </p>
 
         <div className="room-preview">
           <span>{roomLabel || "Sala"}</span>
@@ -406,15 +411,23 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
           <label htmlFor="display-name">Seu nome</label>
           <div className="input-group">
             <User size={16} />
-            <input
-              id="display-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Bigodes"
-              maxLength={60}
-              autoFocus
-            />
+            <div id="display-name" className="static-value">
+              {displayName}
+            </div>
           </div>
+          {currentUser ? (
+            <span className="hint-text">
+              É o nome da sua conta. Pra mudar, acesse{" "}
+              <button type="button" className="link-button inline" onClick={() => onNavigate("/conta")}>
+                Minha conta
+              </button>
+              .
+            </span>
+          ) : (
+            <span className="hint-text">
+              Nome de visitante sorteado. Crie uma conta pra escolher o seu.
+            </span>
+          )}
         </div>
 
         {requiresPassword ? (
@@ -425,6 +438,7 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Esta sala é privada"
+              autoFocus
             />
           </div>
         ) : null}
@@ -460,6 +474,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [roomInfo, setRoomInfo] = useState(null);
+  const [focusedShareId, setFocusedShareId] = useState(null);
   const stageRef = useRef(null);
 
   // Quem tem conta usa o avatar escolhido; visitante sem conta ganha um
@@ -531,6 +546,8 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     selectedAudioInputId,
     changeAudioInput,
     toggleMicrophone,
+    screenQuality,
+    changeScreenQuality,
     toggleScreenShare,
     sendMessage,
   } = useRoomWebRTC({ roomId, name, roomToken, avatarId: myAvatarId });
@@ -582,6 +599,13 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
       local: false,
     })),
   ];
+
+  // Com mais de uma tela sendo compartilhada, mostra só uma por vez em
+  // destaque (em vez de espremer todas numa grade) e deixa escolher qual.
+  // Se a escolhida sumir (a pessoa parou de compartilhar) ou nunca foi
+  // escolhida, cai pra primeira disponível sozinho.
+  const focusedShare =
+    activeShares.find((share) => share.id === focusedShareId) ?? activeShares[0] ?? null;
 
   // Se a transmissão acaba enquanto está em tela cheia, sai sozinho: o botão
   // só existe enquanto tem algo sendo compartilhado.
@@ -781,17 +805,36 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                 </p>
               </div>
             ) : (
-              <div className={`share-grid shares-${Math.min(activeShares.length, 4)}`}>
-                {activeShares.map((share) => (
-                  <article className="share-card" key={share.id}>
-                    <StreamVideo stream={share.stream} muted={share.local} />
-                    <div className="share-label">
-                      <span className="live-dot" />
-                      {share.name} está compartilhando
-                    </div>
-                  </article>
-                ))}
-              </div>
+              <>
+                {activeShares.length > 1 ? (
+                  <div className="stage-selector">
+                    <MonitorUp size={14} />
+                    <select
+                      value={focusedShare?.id ?? ""}
+                      onChange={(event) => setFocusedShareId(event.target.value)}
+                      title="Escolher tela"
+                    >
+                      {activeShares.map((share) => (
+                        <option key={share.id} value={share.id}>
+                          {share.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                <div className="share-grid shares-1">
+                  {focusedShare ? (
+                    <article className="share-card" key={focusedShare.id}>
+                      <StreamVideo stream={focusedShare.stream} muted={focusedShare.local} />
+                      <div className="share-label">
+                        <span className="live-dot" />
+                        {focusedShare.name} está compartilhando
+                      </div>
+                    </article>
+                  ) : null}
+                </div>
+              </>
             )}
           </div>
 
@@ -825,6 +868,21 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                   ))}
                 </optgroup>
               ) : null}
+            </select>
+
+            <select
+              className="device-select"
+              value={screenQuality}
+              onChange={(event) => changeScreenQuality(event.target.value)}
+              disabled={screenSharing}
+              title={
+                screenSharing
+                  ? "Pare o compartilhamento pra trocar a qualidade"
+                  : "Qualidade do compartilhamento de tela"
+              }
+            >
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
             </select>
 
             <button

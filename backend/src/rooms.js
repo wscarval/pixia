@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import prisma from "./db.js";
 import { requireAuth, optionalAuth } from "./auth.js";
 import { sanitizeRoomId, sanitizeRoomName } from "./sanitize.js";
+import { roomPasswordLimiter } from "./rateLimit.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -228,7 +229,7 @@ router.get("/:slug/info", async (req, res) => {
   });
 });
 
-router.post("/:slug/verify", async (req, res) => {
+router.post("/:slug/verify", roomPasswordLimiter, async (req, res) => {
   const slug = sanitizeRoomId(req.params.slug);
   const room = slug ? await findLiveRoomBySlug(slug) : null;
 

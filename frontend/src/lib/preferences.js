@@ -44,6 +44,17 @@ export function setPreferredMicEnabled(enabled) {
   writeAll(prefs);
 }
 
+export function getPreferredScreenQuality() {
+  const value = readAll().screenQuality;
+  return value === "720p" ? "720p" : "1080p";
+}
+
+export function setPreferredScreenQuality(quality) {
+  const prefs = readAll();
+  prefs.screenQuality = quality === "720p" ? "720p" : "1080p";
+  writeAll(prefs);
+}
+
 export function getStoredParticipantVolume(name) {
   const volumes = readAll().participantVolumes || {};
   const key = normalizeName(name);

@@ -28,11 +28,19 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-change-this-secret}
       DATABASE_URL: postgresql://${POSTGRES_USER:-webrtc}:${POSTGRES_PASSWORD:-webrtc}@postgres:5432/${POSTGRES_DB:-webrtc_meeting}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # Precisam bater com "static-auth-secret" e o endereço público do
+      # coturn (ver coturn/turnserver.conf). Só usados se VITE_TURN_ENABLED
+      # também estiver ligado no frontend.
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_URL: ${TURN_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "3001:3001"
+    # De propósito, sem "ports:" aqui: o backend só deve ser alcançável pelo
+    # Nginx via rede interna do Compose (webrtc-network). Publicar 3001 no
+    # host deixaria a API acessível direto da internet, pulando o Nginx (e a
+    # Cloudflare, em produção) — inclusive o limite de salas por IP, que
+    # depende do X-Forwarded-For que só o Nginx define de forma confiável.
     networks:
       - webrtc-network
 
@@ -41,10 +49,9 @@ services:
       context: ./frontend
       args:
         VITE_STUN_URL: ${VITE_STUN_URL:-stun:stun.cloudflare.com:3478}
+        # Só liga/desliga o uso de TURN no cliente — a credencial em si vem
+        # de GET /api/turn-credentials (backend), não é mais fixa no bundle.
         VITE_TURN_ENABLED: ${VITE_TURN_ENABLED:-false}
-        VITE_TURN_URL: ${VITE_TURN_URL:-}
-        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
-        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
     container_name: webrtc-frontend
     restart: unless-stopped
     depends_on:

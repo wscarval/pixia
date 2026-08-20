@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import prisma from "./db.js";
 import { sanitizeAvatarId } from "./sanitize.js";
+import { authLimiter } from "./rateLimit.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -93,7 +94,7 @@ export async function optionalAuth(req, _res, next) {
 
 const router = Router();
 
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, async (req, res) => {
   const name = sanitizeName(req.body?.name);
   const email = sanitizeEmail(req.body?.email);
   const password = String(req.body?.password || "");
@@ -119,9 +120,16 @@ router.post("/register", async (req, res) => {
     return;
   }
 
+  // Mensagem genérica de propósito (não "já existe uma conta com este
+  // e-mail"): isso deixaria qualquer um descobrir, e-mail por e-mail, quem
+  // tem conta aqui. O bcrypt.hash roda mesmo quando o e-mail já existe pelo
+  // mesmo motivo — é a parte mais lenta do caminho de sucesso, então pular
+  // ela só no caso "já existe" vazaria a mesma informação pelo tempo de
+  // resposta.
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    res.status(409).json({ ok: false, message: "Já existe uma conta com este e-mail." });
+    await bcrypt.hash(password, 12);
+    res.status(409).json({ ok: false, message: "Não foi possível criar a conta." });
     return;
   }
 
@@ -138,7 +146,7 @@ router.post("/register", async (req, res) => {
     });
   } catch (error) {
     if (error.code === "P2002") {
-      res.status(409).json({ ok: false, message: "Já existe uma conta com este e-mail." });
+      res.status(409).json({ ok: false, message: "Não foi possível criar a conta." });
       return;
     }
     throw error;
@@ -147,7 +155,7 @@ router.post("/register", async (req, res) => {
   res.status(201).json({ ok: true, token: issueToken(user), user: publicUser(user) });
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   const email = sanitizeEmail(req.body?.email);
   const password = String(req.body?.password || "");
 
@@ -201,7 +209,7 @@ router.put("/avatar", requireAuth, async (req, res) => {
   res.json({ ok: true, user: publicUser(updated) });
 });
 
-router.put("/password", requireAuth, async (req, res) => {
+router.put("/password", requireAuth, authLimiter, async (req, res) => {
   const currentPassword = String(req.body?.currentPassword || "");
   const newPassword = String(req.body?.newPassword || "");
 

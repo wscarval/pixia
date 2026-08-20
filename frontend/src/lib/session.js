@@ -18,7 +18,6 @@ export function getStoredUser() {
 export function saveSession(token, user) {
   localStorage.setItem("webrtc-token", token);
   localStorage.setItem("webrtc-user", JSON.stringify(user));
-  if (user?.name) localStorage.setItem("webrtc-name", user.name);
 }
 
 export function clearSession() {
@@ -30,7 +29,6 @@ export function clearSession() {
 // no token, que continua válido.
 export function updateStoredUser(user) {
   localStorage.setItem("webrtc-user", JSON.stringify(user));
-  if (user?.name) localStorage.setItem("webrtc-name", user.name);
 }
 
 export async function authFetch(url, options = {}) {

@@ -1,8 +1,41 @@
-const { app, BrowserWindow, session, desktopCapturer, ipcMain } = require("electron");
+const { app, BrowserWindow, session, desktopCapturer, ipcMain, shell } = require("electron");
 const path = require("node:path");
 
-const APP_URL = process.env.WORKROOM_URL || "http://localhost";
+const APP_URL = process.env.WORKROOM_URL || "https://pixiaart.com/";
 const ICON_PATH = path.join(__dirname, "../build/icon.png");
+
+const APP_ORIGIN = (() => {
+  try {
+    return new URL(APP_URL).origin;
+  } catch {
+    return null;
+  }
+})();
+
+// Sem isso, a janela navegaria pra qualquer URL que o conteúdo carregado
+// mandasse (ex: um link malicioso que chegasse a virar navegação em vez de
+// abertura em nova aba). Só a própria origem do app pode navegar dentro da
+// janela; qualquer outro destino abre no navegador padrão do sistema.
+function isAppOrigin(url) {
+  try {
+    return APP_ORIGIN !== null && new URL(url).origin === APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+function restrictNavigation(webContents) {
+  webContents.on("will-navigate", (event, url) => {
+    if (isAppOrigin(url)) return;
+    event.preventDefault();
+    shell.openExternal(url).catch(() => {});
+  });
+
+  webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url).catch(() => {});
+    return { action: "deny" };
+  });
+}
 
 let audioCapture = null;
 try {
@@ -37,7 +70,7 @@ function openSourcePicker(sources) {
         preload: path.join(__dirname, "picker-preload.js"),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
       },
     });
 
@@ -67,6 +100,7 @@ function openSourcePicker(sources) {
     ipcMain.on("picker:selected", onSelected);
     picker.on("closed", () => finish(null));
 
+    restrictNavigation(picker.webContents);
     picker.loadFile(path.join(__dirname, "picker.html"));
   });
 }
@@ -84,10 +118,20 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      // Por padrão o Electron/Chromium desacelera timers (setInterval etc.)
+      // quando a janela não está em foco, pra economizar energia. Isso não
+      // atrasa o WebSocket em si, mas atrasa o próprio JS que mede o ping
+      // (setInterval de 4s + callback do ack), inflando a leitura de latência
+      // sem ter piorado a rede de verdade — daí "Conexão instável" só no app
+      // (minimizado/sem foco) e nunca no navegador (aba sempre ativa). Numa
+      // chamada, continuar respondendo em tempo real mesmo minimizado importa
+      // mais que economizar bateria.
+      backgroundThrottling: false,
     },
   });
 
+  restrictNavigation(win.webContents);
   win.loadURL(APP_URL);
 
   win.webContents.on("did-fail-load", (_event, code, description) => {

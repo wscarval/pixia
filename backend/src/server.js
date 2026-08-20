@@ -12,10 +12,14 @@ const server = http.createServer(app);
 const PORT = Number(process.env.PORT || 3001);
 
 app.disable("x-powered-by");
-// Sempre atrás do Nginx (e da Cloudflare, em produção): confia no
-// X-Forwarded-For pra req.ip refletir o IP real de quem acessa, não o do
-// proxy. Usado pro limite de salas públicas por IP em rooms.js.
-app.set("trust proxy", true);
+// Confia em exatamente 1 hop de proxy (o Nginx, único jeito de chegar aqui
+// já que o backend não publica porta no host). Com "true" (todos os hops),
+// o Express usa o primeiro IP da cadeia X-Forwarded-For — e esse primeiro
+// valor pode ser forjado por quem manda a requisição, já que o Nginx só
+// *acrescenta* o IP de quem conecta nele, sem apagar o que já veio no
+// cabeçalho. Com "1", ele usa o IP que o próprio Nginx acrescentou (a
+// conexão real), ignorando qualquer coisa que o cliente tenha inventado.
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "64kb" }));
 
 app.use("/api/auth", authRouter);
@@ -29,9 +33,43 @@ app.get("/health", (_req, res) => {
   });
 });
 
-const corsOrigin = process.env.CORS_ORIGIN
+const TURN_SECRET = process.env.TURN_SECRET;
+const TURN_URL = process.env.TURN_URL;
+const TURN_TTL_SECONDS = 3600;
+
+// Credencial de TURN de curta duração (esquema "REST API" do coturn: usuário
+// é o timestamp de expiração, senha é HMAC-SHA1 disso com um segredo
+// compartilhado só entre backend e coturn). Em vez de uma credencial fixa
+// embutida pra sempre no bundle do cliente, essa aqui expira sozinha.
+app.get("/api/turn-credentials", (_req, res) => {
+  if (!TURN_SECRET || !TURN_URL) {
+    res.status(503).json({ ok: false, message: "TURN não configurado." });
+    return;
+  }
+
+  const expiry = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
+  const username = String(expiry);
+  const credential = crypto.createHmac("sha1", TURN_SECRET).update(username).digest("base64");
+
+  res.json({ ok: true, urls: TURN_URL, username, credential, ttl: TURN_TTL_SECONDS });
+});
+
+// Sem CORS_ORIGIN configurado, fecha por padrão (nenhuma origem cruzada
+// permitida) em vez de liberar geral: o próprio app sempre fala com o
+// Socket.IO pela mesma origem (via Nginx), então isso não quebra o uso
+// normal — só impede que qualquer outro site abra conexões pra cá.
+const configuredCorsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
-  : true;
+  : [];
+
+if (configuredCorsOrigins.length === 0) {
+  console.warn(
+    "[cors] CORS_ORIGIN não configurado: conexões de outras origens ficam bloqueadas por padrão. " +
+      "Defina CORS_ORIGIN=https://seu-dominio.com no .env se precisar liberar alguma."
+  );
+}
+
+const corsOrigin = configuredCorsOrigins.length > 0 ? configuredCorsOrigins : false;
 
 const io = new Server(server, {
   path: "/socket.io",
@@ -43,6 +81,28 @@ const io = new Server(server, {
   pingInterval: 25000,
   pingTimeout: 20000,
 });
+
+// Limite de mensagens por socket (não por IP: cada conexão já representa um
+// participante numa sala). Evita inundar a sala de mensagens e, pra salas
+// particulares, evita amplificar isso em escritas no banco.
+const CHAT_RATE_LIMIT = 10;
+const CHAT_RATE_WINDOW_MS = 10_000;
+
+function isChatRateLimited(socket) {
+  const now = Date.now();
+  const recent = (socket.data.chatTimestamps || []).filter(
+    (timestamp) => now - timestamp < CHAT_RATE_WINDOW_MS
+  );
+
+  if (recent.length >= CHAT_RATE_LIMIT) {
+    socket.data.chatTimestamps = recent;
+    return true;
+  }
+
+  recent.push(now);
+  socket.data.chatTimestamps = recent;
+  return false;
+}
 
 async function getRoomParticipants(roomId, ignoreSocketId = null) {
   const sockets = await io.in(roomId).fetchSockets();
@@ -201,6 +261,7 @@ io.on("connection", (socket) => {
     const cleanMessage = sanitizeMessage(message);
 
     if (!roomId || !cleanMessage) return;
+    if (isChatRateLimited(socket)) return;
 
     const userName = socket.data.name || "Usuário";
 

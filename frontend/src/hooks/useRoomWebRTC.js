@@ -9,13 +9,25 @@ import {
 import {
   getPreferredAudioInputId,
   getPreferredMicEnabled,
+  getPreferredScreenQuality,
   setPreferredAudioInputId,
   setPreferredMicEnabled,
+  setPreferredScreenQuality,
 } from "../lib/preferences.js";
+import { playSoundEffect } from "../lib/soundEffects.js";
 
 export const ELECTRON_APP_PREFIX = "electron-app:";
 
-function buildIceServers() {
+const SCREEN_QUALITY_PRESETS = {
+  "720p": { width: 1280, height: 720 },
+  "1080p": { width: 1920, height: 1080 },
+};
+
+// O TURN não usa mais credencial fixa embutida no bundle (ela nunca
+// mudaria e ficaria visível pra sempre no JS público). Em vez disso, busca
+// uma credencial de curta duração do backend (ver GET /api/turn-credentials
+// e TURN_SECRET no backend) — cacheada num ref e renovada perto de expirar.
+function buildIceServers(turnServer) {
   const servers = [];
 
   const stunUrl = import.meta.env.VITE_STUN_URL;
@@ -23,18 +35,8 @@ function buildIceServers() {
     servers.push({ urls: stunUrl });
   }
 
-  if (String(import.meta.env.VITE_TURN_ENABLED) === "true") {
-    const turnUrl = import.meta.env.VITE_TURN_URL;
-    const username = import.meta.env.VITE_TURN_USERNAME;
-    const credential = import.meta.env.VITE_TURN_CREDENTIAL;
-
-    if (turnUrl && username && credential) {
-      servers.push({
-        urls: turnUrl,
-        username,
-        credential,
-      });
-    }
+  if (turnServer) {
+    servers.push(turnServer);
   }
 
   return servers;
@@ -47,6 +49,12 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const microphoneStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const screenAppAudioActiveRef = useRef(false);
+  const turnServerRef = useRef(null);
+  const screenQualityRef = useRef(getPreferredScreenQuality());
+  // Guarda o último "compartilhando tela?" conhecido de cada participante
+  // remoto, só pra saber se um media-state é uma mudança de verdade (toca o
+  // som) ou só o servidor confirmando um estado que já era esse.
+  const remoteScreenSharingRef = useRef(new Map());
 
   const [connected, setConnected] = useState(false);
   const [participants, setParticipants] = useState([]);
@@ -61,7 +69,15 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const [selectedAudioInputId, setSelectedAudioInputId] = useState(getPreferredAudioInputId);
   const [pingMs, setPingMs] = useState(null);
   const [requiresPassword, setRequiresPassword] = useState(false);
+  const [screenQuality, setScreenQuality] = useState(screenQualityRef.current);
   const autoEnableMicRef = useRef(getPreferredMicEnabled());
+
+  const changeScreenQuality = useCallback((quality) => {
+    const next = quality === "720p" ? "720p" : "1080p";
+    screenQualityRef.current = next;
+    setScreenQuality(next);
+    setPreferredScreenQuality(next);
+  }, []);
 
   const refreshAudioInputDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -93,6 +109,45 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       if (appAudioInterval) window.clearInterval(appAudioInterval);
     };
   }, [refreshAudioInputDevices, refreshAppAudioSources]);
+
+  // Credencial de TURN de curta duração (backend, não fixa no bundle).
+  // Busca de novo pouco antes de expirar; se falhar, os peers seguem só com
+  // STUN (funciona na maioria das redes, só perde o fallback pra NAT
+  // restritivo).
+  useEffect(() => {
+    if (String(import.meta.env.VITE_TURN_ENABLED) !== "true") return undefined;
+
+    let active = true;
+    let refreshTimer = null;
+
+    const fetchTurnCredentials = async () => {
+      try {
+        const response = await fetch("/api/turn-credentials");
+        const data = await response.json().catch(() => null);
+        if (!active || !response.ok || !data?.ok) return;
+
+        turnServerRef.current = {
+          urls: data.urls,
+          username: data.username,
+          credential: data.credential,
+        };
+
+        // Renova a uns 2min antes de expirar (nunca antes de 30s).
+        const nextFetchMs = Math.max((data.ttl - 120) * 1000, 30000);
+        refreshTimer = window.setTimeout(fetchTurnCredentials, nextFetchMs);
+      } catch {
+        // Sem TURN disponível agora; tenta de novo um pouco depois.
+        if (active) refreshTimer = window.setTimeout(fetchTurnCredentials, 30000);
+      }
+    };
+
+    fetchTurnCredentials();
+
+    return () => {
+      active = false;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
+  }, []);
 
   // Retorna um MediaStream com uma faixa de áudio pronta para uso: um
   // microfone físico normalmente, ou — dentro do app desktop Electron — o
@@ -177,7 +232,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     if (!socket) return null;
 
     const pc = new RTCPeerConnection({
-      iceServers: buildIceServers(),
+      iceServers: buildIceServers(turnServerRef.current),
     });
 
     const peer = {
@@ -449,6 +504,13 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         const existing = response.participants || [];
         setParticipants(existing);
 
+        // Semeia com quem já estava compartilhando antes da gente entrar,
+        // pra não tocar o som de "começou a compartilhar" por engano no
+        // primeiro media-state deles depois que a gente chegou.
+        remoteScreenSharingRef.current = new Map(
+          existing.map((participant) => [participant.id, Boolean(participant.screenSharing)])
+        );
+
         // Salas particulares guardam o histórico no banco; ao (re)conectar,
         // o servidor manda de volta o que já foi trocado nesta sala.
         if (response.messages) setMessages(response.messages);
@@ -467,6 +529,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       setPingMs(null);
       setParticipants([]);
       setRemoteMedia({});
+      remoteScreenSharingRef.current.clear();
 
       peersRef.current.forEach((peer) => {
         try {
@@ -487,6 +550,8 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     socket.on("user-joined", (participant) => {
       if (!active) return;
       upsertParticipant(participant);
+      remoteScreenSharingRef.current.set(participant.id, Boolean(participant.screenSharing));
+      playSoundEffect("enterRoom");
       // Mantemos o RTCPeerConnection preparado, mas sem forçar uma
       // negociação vazia. A primeira mídia adicionada dispara a oferta.
       createPeer(participant.id);
@@ -494,11 +559,21 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
     socket.on("user-left", ({ id }) => {
       if (!active) return;
+      remoteScreenSharingRef.current.delete(id);
+      playSoundEffect("leftRoom");
       removePeer(id);
     });
 
     socket.on("media-state", ({ id, micEnabled: remoteMic, screenSharing: remoteScreen }) => {
       if (!active) return;
+
+      if (typeof remoteScreen === "boolean") {
+        const wasSharing = remoteScreenSharingRef.current.get(id) ?? false;
+        if (remoteScreen !== wasSharing) {
+          remoteScreenSharingRef.current.set(id, remoteScreen);
+          playSoundEffect(remoteScreen ? "screenShare" : "stopScreenShare");
+        }
+      }
 
       updateParticipant(id, {
         micEnabled: remoteMic,
@@ -558,6 +633,13 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         throw new Error("Seu navegador não disponibilizou getUserMedia.");
       }
 
+      // Defesa extra: se a track morreu (onended) mas por algum motivo a ref
+      // não foi limpa a tempo, trata como "sem stream" em vez de reativar
+      // .enabled numa track morta (não faz nada e some o áudio em silêncio).
+      if (microphoneStreamRef.current?.getAudioTracks()[0]?.readyState === "ended") {
+        microphoneStreamRef.current = null;
+      }
+
       if (!microphoneStreamRef.current) {
         const stream = await openAudioInputStream(selectedAudioInputId || undefined);
 
@@ -574,6 +656,13 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         });
 
         track.onended = () => {
+          // Sem isso, o próximo clique no botão de mic cai no ramo "já tem
+          // stream" (abaixo) e só reativa .enabled numa track já morta —
+          // parece ligado na UI, mas nenhum áudio sai. Isso acontece de
+          // verdade: troca de dispositivo padrão pelo Windows, outro app
+          // pegando o mic com prioridade exclusiva, headset Bluetooth
+          // reconectando, etc. Limpar a ref força reabrir o getUserMedia.
+          if (microphoneStreamRef.current === stream) microphoneStreamRef.current = null;
           setMicEnabled(false);
           socketRef.current?.emit("media-state", { micEnabled: false });
         };
@@ -637,6 +726,9 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         microphoneStreamRef.current = nextStream;
 
         nextTrack.onended = () => {
+          // Mesmo motivo do outro onended, em toggleMicrophone: sem limpar a
+          // ref, o próximo clique reaproveitaria uma track já morta.
+          if (microphoneStreamRef.current === nextStream) microphoneStreamRef.current = null;
           setMicEnabled(false);
           socketRef.current?.emit("media-state", { micEnabled: false });
         };
@@ -706,9 +798,15 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
       if (screenStreamRef.current) return;
 
+      // "ideal", não "exact": o navegador ainda pode entregar outra coisa
+      // (ex: a tela de origem já é menor que o preset), mas ele tenta
+      // capturar/reamostrar nessa resolução em vez de mandar no tamanho nativo.
+      const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS["1080p"];
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           frameRate: { ideal: 30, max: 60 },
+          width: { ideal: preset.width },
+          height: { ideal: preset.height },
         },
         audio: true,
       });
@@ -805,6 +903,8 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     selectedAudioInputId,
     changeAudioInput,
     toggleMicrophone,
+    screenQuality,
+    changeScreenQuality,
     toggleScreenShare,
     sendMessage,
   };
