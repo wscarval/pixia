@@ -105,6 +105,8 @@ Ao clicar em "Compartilhar minha tela", o navegador pede vídeo e áudio da font
 
 Em `electron/` há um app desktop que carrega o mesmo site publicado dentro de uma janela nativa. A vantagem sobre o navegador: um módulo nativo captura o áudio de um app específico do Windows (Discord, Spotify, um jogo) para compartilhar na chamada — algo que nenhum navegador consegue fazer sozinho, por limitação da própria plataforma web. Veja `electron/README.md` para detalhes de build e as pegadinhas do WASAPI envolvidas.
 
+O instalador do Windows fica disponível pra qualquer visitante em `/download` (link também na tela inicial). O `.exe` gerado por `npm run build:win` dentro de `electron/` é copiado manualmente para `frontend/public/downloads/Pixia-Setup-<versão>.exe`; ao lançar uma versão nova, gere o instalador de novo, copie o arquivo com o nome atualizado e ajuste `VERSION`/`SIZE_MB`/`INSTALLER_URL` em `frontend/src/components/DownloadApp.jsx`. Por enquanto só Windows tem instalador; macOS e Linux usam o navegador.
+
 ## Deploy em pixiaart.com (atrás da Cloudflare)
 
 O Nginx do frontend já está configurado com `server_name pixiaart.com`, publicado na porta `80` do host (`docker-compose.yml`). O TLS é terminado na Cloudflare — este container só serve HTTP e confia no `X-Forwarded-Proto` que ela define (com fallback para o próprio `$scheme` caso o cabeçalho não venha).

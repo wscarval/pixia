@@ -1,7 +1,7 @@
 const { app, BrowserWindow, session, desktopCapturer, ipcMain } = require("electron");
 const path = require("node:path");
 
-const APP_URL = process.env.WORKROOM_URL || "https://pixiaart.com";
+const APP_URL = process.env.WORKROOM_URL || "http://localhost";
 const ICON_PATH = path.join(__dirname, "../build/icon.png");
 
 let audioCapture = null;

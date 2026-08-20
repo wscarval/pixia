@@ -101,6 +101,50 @@ button {
   margin-top: 24px;
 }
 
+.download-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.download-meta {
+  text-align: center;
+}
+
+.download-note {
+  margin-top: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 13px;
+  background: #0c0c0f;
+  color: #a1a1aa;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.download-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #71717a;
+}
+
+.download-note.already-installed {
+  margin-top: 20px;
+  border-color: rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.08);
+  color: #6ee7b7;
+}
+
+.download-note.already-installed svg {
+  color: #6ee7b7;
+}
+
 .brand-mark {
   width: 335px;
   height: 162px;

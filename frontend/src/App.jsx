@@ -29,6 +29,7 @@ import Account from "./components/Account.jsx";
 import AuthLayout from "./components/AuthLayout.jsx";
 import TermsOfUse from "./components/TermsOfUse.jsx";
 import PrivacyPolicy from "./components/PrivacyPolicy.jsx";
+import DownloadApp from "./components/DownloadApp.jsx";
 import PasswordField from "./components/PasswordField.jsx";
 import {
   authFetch,
@@ -40,6 +41,7 @@ import {
   saveRoomSession,
 } from "./lib/session.js";
 import { getStoredParticipantVolume, setStoredParticipantVolume } from "./lib/preferences.js";
+import { isElectronDesktop } from "./lib/electronAppAudio.js";
 
 const AVATAR_PALETTE = [
   ["#8b5cf6", "#6d28d9"],
@@ -267,6 +269,12 @@ function Landing({ onNavigate, currentUser }) {
             </button>
           </p>
         )}
+
+        {!isElectronDesktop() ? (
+          <button type="button" className="link-button" onClick={() => onNavigate("/download")}>
+            Baixar app desktop (Windows)
+          </button>
+        ) : null}
 
         <p className="legal-notice">
           Ao continuar, você concorda com nossos{" "}
@@ -760,9 +768,16 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                   {isFirefox
                     ? "No Firefox, escolha \"Tela inteira\" (não uma janela ou aba) para ter a opção de compartilhar áudio, e só no Windows ou Linux; no macOS o Firefox ainda não oferece áudio do sistema."
                     : "Para levar o áudio da aba ou da tela junto, marque a opção de compartilhar áudio na janela que o navegador abrir."}
-                  {" "}
-                  Quer o áudio de um app específico (tipo Discord ou Spotify)? Baixe o app
-                  desktop do Pixia, ele captura isso direto, sem configuração.
+                  {!isElectronDesktop() ? (
+                    <>
+                      {" "}
+                      Quer o áudio de um app específico (tipo Discord ou Spotify)?{" "}
+                      <a href="/download" className="link-button inline">
+                        Baixe o app desktop do Pixia
+                      </a>
+                      , ele captura isso direto, sem configuração.
+                    </>
+                  ) : null}
                 </p>
               </div>
             ) : (
@@ -872,7 +887,15 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
   );
 }
 
-const SPECIAL_ROUTES = ["/cadastro", "/entrar", "/painel", "/conta", "/termos", "/privacidade"];
+const SPECIAL_ROUTES = [
+  "/cadastro",
+  "/entrar",
+  "/painel",
+  "/conta",
+  "/termos",
+  "/privacidade",
+  "/download",
+];
 
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
@@ -947,6 +970,10 @@ export default function App() {
 
   if (pathname === "/privacidade") {
     return <PrivacyPolicy onNavigate={navigate} />;
+  }
+
+  if (pathname === "/download") {
+    return <DownloadApp onNavigate={navigate} />;
   }
 
   if (pathname === "/cadastro") {
