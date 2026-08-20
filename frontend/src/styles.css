@@ -1205,6 +1205,47 @@ button {
     grid-template-columns: 1fr 1fr;
     align-items: start;
   }
+
+  .avatar-card {
+    grid-column: 1 / -1;
+  }
+}
+
+.avatar-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.avatar-option {
+  width: 64px;
+  height: 64px;
+  padding: 10px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: #1d1d23;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.avatar-option img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.avatar-option:hover {
+  background: #26262e;
+}
+
+.avatar-option.selected {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+}
+
+.avatar-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .checkbox-row {

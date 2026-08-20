@@ -1,8 +1,8 @@
 {
-  "name": "workroom-desktop",
+  "name": "Pixia",
   "version": "1.0.0",
   "private": true,
-  "description": "Pixia — cliente desktop (Electron) para pixiaart.com",
+  "description": "Pixia - Desktop",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

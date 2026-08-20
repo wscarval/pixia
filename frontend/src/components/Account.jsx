@@ -5,8 +5,15 @@ import { authFetch, updateStoredUser } from "../lib/session.js";
 
 const MIN_NAME_LENGTH = 4;
 const MIN_PASSWORD_LENGTH = 6;
+// Fotos de perfil fixas: 4 gatinhos em /public/profiles_cats, sem upload.
+const AVATAR_COUNT = 4;
+const AVATAR_IDS = Array.from({ length: AVATAR_COUNT }, (_, index) => index + 1);
 
 export default function Account({ user, onNavigate, onUserUpdated }) {
+  const [avatarId, setAvatarId] = useState(user?.avatarId || 1);
+  const [avatarError, setAvatarError] = useState("");
+  const [savingAvatar, setSavingAvatar] = useState(false);
+
   const [name, setName] = useState(user?.name || "");
   const [nameError, setNameError] = useState("");
   const [nameSuccess, setNameSuccess] = useState(false);
@@ -18,6 +25,37 @@ export default function Account({ user, onNavigate, onUserUpdated }) {
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+
+  async function chooseAvatar(id) {
+    if (id === avatarId || savingAvatar) return;
+
+    setAvatarError("");
+    setSavingAvatar(true);
+    const previous = avatarId;
+    setAvatarId(id);
+
+    try {
+      const { response, data } = await authFetch("/api/auth/avatar", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatarId: id }),
+      });
+
+      if (!response.ok || !data?.ok) {
+        setAvatarId(previous);
+        setAvatarError(data?.message || "Não foi possível salvar o avatar.");
+        return;
+      }
+
+      updateStoredUser(data.user);
+      onUserUpdated(data.user);
+    } catch {
+      setAvatarId(previous);
+      setAvatarError("Falha ao conectar ao servidor.");
+    } finally {
+      setSavingAvatar(false);
+    }
+  }
 
   async function saveName(event) {
     event.preventDefault();
@@ -112,6 +150,27 @@ export default function Account({ user, onNavigate, onUserUpdated }) {
       </header>
 
       <div className="account-grid">
+        <div className="create-room-card avatar-card">
+          <h2>Foto de perfil</h2>
+
+          <div className="avatar-picker">
+            {AVATAR_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`avatar-option${id === avatarId ? " selected" : ""}`}
+                onClick={() => chooseAvatar(id)}
+                disabled={savingAvatar}
+                title={`Gatinho ${id}`}
+              >
+                <img src={`/profiles_cats/cat${id}.png`} alt={`Gatinho ${id}`} />
+              </button>
+            ))}
+          </div>
+
+          {avatarError ? <div className="error-banner inline">{avatarError}</div> : null}
+        </div>
+
         <form className="create-room-card" onSubmit={saveName} noValidate>
           <h2>Nome de usuário</h2>
 
