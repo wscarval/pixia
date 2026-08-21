@@ -2,6 +2,21 @@ import { useEffect, useState } from "react";
 import { Check, Copy, Globe, Home, Lock, LogOut, Plus, Trash2, Unlock, User } from "lucide-react";
 import PasswordField from "./PasswordField.jsx";
 import { authFetch, clearSession } from "../lib/session.js";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const MIN_ROOM_PASSWORD_LENGTH = 6;
 
@@ -11,6 +26,7 @@ function RoomRow({ room, onDelete, onUpdatePassword }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const roomUrl = `${window.location.origin}/r/${room.slug}`;
 
@@ -53,67 +69,108 @@ function RoomRow({ room, onDelete, onUpdatePassword }) {
   }
 
   return (
-    <div className="room-card">
-      <div className="room-card-main">
-        <div className={`room-badge ${room.isPublic ? "public" : "private"}`}>
+    <Card className="gap-3 rounded-2xl border-white/8 bg-card p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge
+          variant="outline"
+          className={
+            room.isPublic
+              ? "gap-1.5 border-success/25 bg-success/10 text-success"
+              : "gap-1.5 border-primary/25 bg-primary/10 text-primary"
+          }
+        >
           {room.isPublic ? <Globe size={13} /> : <Lock size={13} />}
           {room.isPublic ? "Público" : "Privado"}
+        </Badge>
+
+        <div className="mr-auto min-w-0">
+          <strong className="block truncate text-sm font-semibold text-foreground">
+            {room.name || "Sala sem nome"}
+          </strong>
+          <span className="block truncate text-xs text-muted-foreground">/r/{room.slug}</span>
         </div>
 
-        <div className="room-card-copy">
-          <strong>{room.name || "Sala sem nome"}</strong>
-          <span>/r/{room.slug}</span>
-        </div>
-
-        <div className="room-card-actions">
-          <button className="ghost-button compact" onClick={copyLink} title="Copiar link">
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={copyLink} title="Copiar link">
             {copied ? <Check size={15} /> : <Copy size={15} />}
-          </button>
+          </Button>
 
           {room.isPublic ? (
-            <button
-              className="ghost-button compact"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setEditingPassword((current) => !current)}
               title="Definir senha (tornar privado)"
             >
               <Lock size={15} />
-            </button>
+            </Button>
           ) : (
-            <button
-              className="ghost-button compact"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={removePassword}
               disabled={saving}
               title="Remover senha (tornar público)"
             >
               <Unlock size={15} />
-            </button>
+            </Button>
           )}
 
-          <button
-            className="ghost-button compact danger"
-            onClick={() => onDelete(room.id)}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setConfirmingDelete(true)}
             title="Excluir link"
           >
             <Trash2 size={15} />
-          </button>
+          </Button>
         </div>
       </div>
 
       {editingPassword ? (
-        <form className="room-password-form" onSubmit={savePassword}>
-          <PasswordField
-            value={passwordInput}
-            onChange={(event) => setPasswordInput(event.target.value)}
-            placeholder="Definir senha para a sala"
-            autoFocus
-          />
-          <button className="primary-button compact" type="submit" disabled={saving}>
+        <form className="flex flex-wrap items-start gap-2 border-t border-white/5 pt-3" onSubmit={savePassword}>
+          <div className="min-w-40 flex-1">
+            <PasswordField
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+              placeholder="Definir senha para a sala"
+              autoFocus
+            />
+          </div>
+          <Button type="submit" className="h-11 rounded-xl" disabled={saving}>
             {saving ? "Salvando..." : "Salvar"}
-          </button>
-          {error ? <span className="field-error">{error}</span> : null}
+          </Button>
+          {error ? <span className="w-full text-xs text-destructive">{error}</span> : null}
         </form>
       ) : null}
-    </div>
+
+      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir este link?</DialogTitle>
+            <DialogDescription>
+              A sala "{room.name || "Sala sem nome"}" (/r/{room.slug}) vai parar de existir. Quem
+              tiver o link não vai mais conseguir entrar.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmingDelete(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setConfirmingDelete(false);
+                onDelete(room.id);
+              }}
+            >
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
 
@@ -216,84 +273,96 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
   }
 
   return (
-    <main className="panel-page">
-      <header className="panel-header">
-        <div className="brand-area">
-          <div className="brand-mark small">
-            <img src="/pixia.png" alt="Pixia" />
+    <main className="min-h-screen">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
           </div>
-          <div>
-            <strong>Meus links</strong>
-            <span>{user?.name}</span>
+          <div className="min-w-0">
+            <strong className="block text-sm font-semibold text-foreground">Meus links</strong>
+            <span className="block truncate text-xs text-muted-foreground">{user?.name}</span>
           </div>
         </div>
 
-        <div className="topbar-actions">
-          <button className="ghost-button" onClick={() => onNavigate("/conta")}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={() => onNavigate("/conta")}>
             <User size={16} />
             Minha conta
-          </button>
-          <button className="ghost-button" onClick={() => onNavigate("/")}>
+          </Button>
+          <Button variant="secondary" onClick={() => onNavigate("/")}>
             <Home size={16} />
             Ir para entrada
-          </button>
-          <button className="ghost-button" onClick={logout}>
+          </Button>
+          <Button variant="secondary" onClick={logout}>
             <LogOut size={16} />
             Sair
-          </button>
+          </Button>
         </div>
       </header>
 
-      <div className="panel-body">
-        <form className="create-room-card" onSubmit={createRoom}>
-          <h2>Criar novo link</h2>
+      <div className="grid grid-cols-[minmax(0,320px)_1fr] items-start gap-6 p-6 max-lg:grid-cols-1">
+        <Card className="rounded-2xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-6">
+          <form onSubmit={createRoom} className="grid gap-4">
+            <h2 className="text-base font-semibold text-foreground">Criar novo link</h2>
 
-          <div className="field">
-            <label htmlFor="room-name">Nome (opcional)</label>
-            <input
-              id="room-name"
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              placeholder="Sala Sobre Gatinhos"
-              maxLength={80}
-            />
-          </div>
-
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={makePrivate}
-              onChange={(event) => setMakePrivate(event.target.checked)}
-            />
-            Tornar privado (exigir senha para entrar)
-          </label>
-
-          {makePrivate ? (
-            <div className="field">
-              <label htmlFor="room-password">Senha</label>
-              <PasswordField
-                id="room-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                placeholder={`Mínimo de ${MIN_ROOM_PASSWORD_LENGTH} caracteres`}
+            <div className="grid gap-2">
+              <Label htmlFor="room-name">Nome (opcional)</Label>
+              <Input
+                id="room-name"
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                placeholder="Sala Sobre Gatinhos"
+                maxLength={80}
+                className="h-11 rounded-xl bg-input/30"
               />
             </div>
+
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-muted-foreground">
+              <Checkbox
+                checked={makePrivate}
+                onCheckedChange={(checked) => setMakePrivate(Boolean(checked))}
+              />
+              Tornar privado (exigir senha para entrar)
+            </label>
+
+            {makePrivate ? (
+              <div className="grid gap-2">
+                <Label htmlFor="room-password">Senha</Label>
+                <PasswordField
+                  id="room-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder={`Mínimo de ${MIN_ROOM_PASSWORD_LENGTH} caracteres`}
+                />
+              </div>
+            ) : null}
+
+            {createError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{createError}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <Button type="submit" size="lg" className="h-11 w-full rounded-xl text-sm" disabled={creating}>
+              <Plus size={17} />
+              {creating ? "Criando..." : "Criar link"}
+            </Button>
+          </form>
+        </Card>
+
+        <div className="grid gap-3">
+          {loading ? <p className="text-sm text-muted-foreground">Carregando...</p> : null}
+          {loadError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{loadError}</AlertDescription>
+            </Alert>
           ) : null}
 
-          {createError ? <div className="error-banner inline">{createError}</div> : null}
-
-          <button className="primary-button" type="submit" disabled={creating}>
-            <Plus size={17} />
-            {creating ? "Criando..." : "Criar link"}
-          </button>
-        </form>
-
-        <div className="room-list">
-          {loading ? <p className="muted">Carregando...</p> : null}
-          {loadError ? <div className="error-banner inline">{loadError}</div> : null}
-
           {!loading && !loadError && rooms.length === 0 ? (
-            <p className="muted">Você ainda não criou nenhum link. Crie o primeiro ao lado.</p>
+            <p className="text-sm text-muted-foreground">
+              Você ainda não criou nenhum link. Crie o primeiro ao lado.
+            </p>
           ) : null}
 
           {rooms.map((room) => (

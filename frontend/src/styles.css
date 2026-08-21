@@ -1,14 +1,93 @@
-:root {
-  --accent: #7c3aed;
-  --accent-strong: #8b5cf6;
-  --accent-soft: rgba(139, 92, 246, 0.14);
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+@custom-variant dark (&:is(.dark *));
+
+/* Declara a ordem das camadas explicitamente: "legacy" (o CSS velho dos
+   componentes ainda não migrados pros passes B-F) fica com prioridade MENOR
+   que "utilities" (onde o Tailwind gera as classes tipo pl-10, bg-card
+   etc.). Sem isso, CSS sem camada nenhuma sempre vence sobre CSS em
+   qualquer camada — então um seletor velho tipo ".create-room-card input"
+   sobrescrevia o padding de um <Input> novo do shadcn só por estar
+   aninhado dentro de um container ainda não convertido. Com "legacy"
+   como camada nomeada e essa ordem aqui, as classes do Tailwind sempre
+   ganham, não importa onde o componente novo esteja aninhado. */
+@layer theme, base, components, legacy, utilities;
+
+/* Paleta inspirada no Discord (cinzas em camadas + accent na família
+   "blurple"), não uma cópia 1:1. Esse app não tem alternância claro/escuro,
+   então os tokens semânticos do shadcn (--background, --primary, --card
+   etc., ver @theme inline mais abaixo no arquivo) apontam direto pra essa
+   paleta em :root, sem depender de uma classe .dark. */
+@theme {
+  --breakpoint-mobile: 740px;
+  --breakpoint-compact: 760px;
+  --breakpoint-panel: 1050px;
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+:root {
+  /* Compatibilidade com o CSS legado (ainda não migrado pros passes B-F).
+     Mesmo valor do novo --primary, só isolado do nome --accent do shadcn:
+     no vocabulário deles "--accent" é o fundo sutil de hover/seleção, não a
+     cor de marca — nomes iguais, papéis diferentes, por isso o rename. */
+  --legacy-accent: #6c5edb;
+  --legacy-accent-strong: #7f72e8;
+  --legacy-accent-soft: rgba(108, 94, 219, 0.14);
+
   color: #f4f4f5;
-  background: #09090b;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+
+  --background: #0b0c10;
+  --foreground: #f2f3f5;
+  --card: #1c1d21;
+  --card-foreground: #f2f3f5;
+  --popover: #232428;
+  --popover-foreground: #f2f3f5;
+  --primary: #6c5edb;
+  --primary-foreground: #f8f7ff;
+  --secondary: #1c1d21;
+  --secondary-foreground: #f2f3f5;
+  --muted: #16171a;
+  --muted-foreground: #949ba4;
+  --accent: #26272c;
+  --accent-foreground: #f2f3f5;
+  --destructive: #f23f42;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #6c5edb;
+  --success: #23a55a;
+  --warning: #f0b132;
+  --radius: 0.625rem;
+  --sidebar: #111214;
+  --sidebar-foreground: #f2f3f5;
+  --sidebar-primary: #6c5edb;
+  --sidebar-primary-foreground: #f8f7ff;
+  --sidebar-accent: #1c1d21;
+  --sidebar-accent-foreground: #f2f3f5;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #6c5edb;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background-image: radial-gradient(circle at 50% -10%, rgba(108, 94, 219, 0.12), transparent 35%);
+  }
 }
 
 * {
@@ -23,12 +102,6 @@ body,
   min-height: 100%;
 }
 
-body {
-  background:
-    radial-gradient(circle at 50% -10%, rgba(124, 58, 237, 0.12), transparent 35%),
-    #09090b;
-}
-
 button,
 input,
 textarea {
@@ -38,6 +111,14 @@ textarea {
 button {
   color: inherit;
 }
+
+/* Todo o CSS abaixo é o que ainda não foi migrado pros componentes
+   shadcn/Tailwind (passes B-F). Fica na camada "legacy" (ver ordem
+   declarada no topo do arquivo) de propósito: assim, quando um componente
+   novo (Input, Button etc. do shadcn) é usado dentro de um container ainda
+   não convertido, as classes utilitárias do Tailwind sempre ganham desses
+   seletores velhos, em vez do contrário. */
+@layer legacy {
 
 /* Auth (entrada / cadastro) */
 
@@ -152,7 +233,7 @@ button {
   display: grid;
   place-items: center;
   border-radius: 16px;
-  /* background: linear-gradient(145deg, var(--accent-strong), #6d28d9); */
+  /* background: linear-gradient(145deg, var(--legacy-accent-strong), #6d28d9); */
   /* box-shadow: 0 12px 30px rgba(109, 40, 217, 0.32); */
   font-size: 21px;
   font-weight: 800;
@@ -312,14 +393,14 @@ button {
   margin-top: 18px;
   padding: 13px 18px;
   border-radius: 13px;
-  background: var(--accent);
+  background: var(--legacy-accent);
   color: white;
   font-weight: 700;
   box-shadow: 0 10px 28px rgba(124, 58, 237, 0.28);
 }
 
 .primary-button:hover {
-  background: var(--accent-strong);
+  background: var(--legacy-accent-strong);
   transform: translateY(-1px);
   box-shadow: 0 14px 34px rgba(124, 58, 237, 0.36);
 }
@@ -520,45 +601,53 @@ button {
   font-size: 11px;
 }
 
-.connection {
+.connection-status {
   margin-left: 10px;
-  padding: 6px 9px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.call-duration {
+  margin-left: 10px;
+  padding: 6px 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #b5bac1;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
+  font-weight: 600;
 }
 
 .connection.online {
   color: #6ee7b7;
-  background: rgba(16, 185, 129, 0.09);
 }
 
 .connection.offline {
   color: #fca5a5;
-  background: rgba(239, 68, 68, 0.09);
-}
-
-.connection-status {
-  margin-left: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.connection-status .connection {
-  margin-left: 0;
 }
 
 .connection-health {
-  padding-left: 9px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: #71717a;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
 }
 
 .health-dot {
@@ -566,6 +655,7 @@ button {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
+  flex-shrink: 0;
 }
 
 .connection-health.tone-good {
@@ -720,7 +810,7 @@ button {
 .volume-slider {
   flex: 1;
   min-width: 0;
-  height: 20px;
+  /* height: 20px; */
   margin: 0;
   padding: 0;
   background: transparent;
@@ -782,6 +872,13 @@ button {
   font-weight: 800;
   letter-spacing: 0.02em;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  transition: box-shadow 0.15s ease;
+}
+
+.avatar.speaking {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 0 0 3px rgba(34, 197, 94, 0.85);
 }
 
 .avatar-img {
@@ -821,6 +918,10 @@ button {
   color: #71717a;
 }
 
+.deafened-icon {
+  color: var(--destructive);
+}
+
 .stage-column {
   min-width: 0;
   min-height: 0;
@@ -858,6 +959,32 @@ button {
   outline: none;
   background: #0d0d10;
   color: #fafafa;
+}
+
+.stage-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px 3px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  background: #0d0d10;
+}
+
+.stage-volume .volume-mute {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #a1a1aa;
+}
+
+.stage-volume .volume-slider {
+  width: 90px;
+  flex: 0 0 auto;
+}
+
+.stage-volume .volume-value {
+  color: #a1a1aa;
 }
 
 .stage:fullscreen,
@@ -1039,7 +1166,7 @@ button {
 }
 
 .share-control.sharing {
-  background: var(--accent);
+  background: var(--legacy-accent);
   box-shadow: 0 10px 24px rgba(124, 58, 237, 0.32);
 }
 
@@ -1181,11 +1308,11 @@ button {
   display: grid;
   place-items: center;
   border-radius: 12px;
-  background: var(--accent);
+  background: var(--legacy-accent);
 }
 
 .chat-input-area button:hover {
-  background: var(--accent-strong);
+  background: var(--legacy-accent-strong);
 }
 
 /* Painel de links */
@@ -1246,7 +1373,7 @@ button {
   margin-top: 0;
 }
 
-.create-room-card input {
+.create-room-card input:not([data-slot="input"]) {
   width: 100%;
   padding: 11px 13px;
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -1321,7 +1448,7 @@ button {
 }
 
 .avatar-option.selected {
-  border-color: var(--accent-strong);
+  border-color: var(--legacy-accent-strong);
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
 }
 
@@ -1343,7 +1470,7 @@ button {
 .checkbox-row input {
   width: 15px;
   height: 15px;
-  accent-color: var(--accent);
+  accent-color: var(--legacy-accent);
   cursor: pointer;
 }
 
@@ -1386,7 +1513,7 @@ button {
 
 .room-badge.private {
   color: #c4b5fd;
-  background: var(--accent-soft);
+  background: var(--legacy-accent-soft);
 }
 
 .room-card-copy {
@@ -1434,7 +1561,7 @@ button {
   flex-wrap: wrap;
 }
 
-.room-password-form input {
+.room-password-form input:not([data-slot="input"]) {
   flex: 1;
   min-width: 160px;
   padding: 9px 12px;
@@ -1512,6 +1639,7 @@ button {
   }
 
   .connection,
+  .call-duration,
   .brand-area span,
   .ghost-button {
     display: none;
@@ -1537,3 +1665,52 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+} /* fim de @layer legacy */
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Sem classe .dark: os valores acima em :root já são a única paleta
+   (o app não tem alternância claro/escuro), e o bloco @layer base já
+   está no topo do arquivo junto com :root. */

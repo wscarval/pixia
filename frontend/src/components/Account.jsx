@@ -2,6 +2,12 @@ import { useState } from "react";
 import { Link2, User } from "lucide-react";
 import PasswordField from "./PasswordField.jsx";
 import { authFetch, updateStoredUser } from "../lib/session.js";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { IconInput } from "@/components/ui/icon-input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 
 const MIN_NAME_LENGTH = 4;
 const MIN_PASSWORD_LENGTH = 6;
@@ -130,110 +136,133 @@ export default function Account({ user, onNavigate, onUserUpdated }) {
   }
 
   return (
-    <main className="panel-page">
-      <header className="panel-header">
-        <div className="brand-area">
-          <div className="brand-mark small">
-            <img src="/pixia.png" alt="Pixia" />
+    <main className="min-h-screen">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
           </div>
-          <div>
-            <strong>Minha conta</strong>
-            <span>{user?.email}</span>
+          <div className="min-w-0">
+            <strong className="block text-sm font-semibold text-foreground">Minha conta</strong>
+            <span className="block truncate text-xs text-muted-foreground">{user?.email}</span>
           </div>
         </div>
 
-        <div className="topbar-actions">
-          <button className="ghost-button" onClick={() => onNavigate("/painel")}>
-            <Link2 size={16} />
-            Meus links
-          </button>
-        </div>
+        <Button variant="secondary" onClick={() => onNavigate("/painel")}>
+          <Link2 size={16} />
+          Meus links
+        </Button>
       </header>
 
-      <div className="account-grid">
-        <div className="create-room-card avatar-card">
-          <h2>Foto de perfil</h2>
+      <div className="grid grid-cols-2 items-start gap-6 p-6 max-lg:grid-cols-1">
+        <Card className="col-span-2 gap-4 rounded-2xl border-white/8 bg-card p-6">
+          <h2 className="text-base font-semibold text-foreground">Foto de perfil</h2>
 
-          <div className="avatar-picker">
+          <div className="flex flex-wrap gap-3">
             {AVATAR_IDS.map((id) => (
               <button
                 key={id}
                 type="button"
-                className={`avatar-option${id === avatarId ? " selected" : ""}`}
                 onClick={() => chooseAvatar(id)}
                 disabled={savingAvatar}
                 title={`Gatinho ${id}`}
+                className={cn(
+                  "size-14 overflow-hidden rounded-full border-2 border-transparent bg-muted p-2 transition-colors hover:border-white/15 disabled:cursor-not-allowed disabled:opacity-60",
+                  id === avatarId && "border-primary hover:border-primary"
+                )}
               >
-                <img src={`/profiles_cats/cat${id}.png`} alt={`Gatinho ${id}`} />
+                <img src={`/profiles_cats/cat${id}.png`} alt={`Gatinho ${id}`} className="h-full w-full object-contain" />
               </button>
             ))}
           </div>
 
-          {avatarError ? <div className="error-banner inline">{avatarError}</div> : null}
-        </div>
+          {avatarError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{avatarError}</AlertDescription>
+            </Alert>
+          ) : null}
+        </Card>
 
-        <form className="create-room-card" onSubmit={saveName} noValidate>
-          <h2>Nome de usuário</h2>
+        <Card className="rounded-2xl border-white/8 bg-card p-6">
+          <form onSubmit={saveName} className="grid gap-4">
+            <h2 className="text-base font-semibold text-foreground">Nome de usuário</h2>
 
-          <div className="field">
-            <label htmlFor="account-name">Nome</label>
-            <div className="input-group">
-              <User size={16} />
-              <input
+            <div className="grid gap-2">
+              <Label htmlFor="account-name">Nome</Label>
+              <IconInput
+                icon={User}
                 id="account-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 maxLength={60}
               />
             </div>
-          </div>
 
-          {nameSuccess ? <div className="success-banner">Nome atualizado.</div> : null}
-          {nameError ? <div className="error-banner inline">{nameError}</div> : null}
+            {nameSuccess ? (
+              <Alert className="border-success/25 bg-success/10 text-success">
+                <AlertDescription className="text-success/90">Nome atualizado.</AlertDescription>
+              </Alert>
+            ) : null}
+            {nameError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{nameError}</AlertDescription>
+              </Alert>
+            ) : null}
 
-          <button className="primary-button" type="submit" disabled={savingName}>
-            {savingName ? "Salvando..." : "Salvar nome"}
-          </button>
-        </form>
+            <Button type="submit" className="h-11 w-full rounded-xl text-sm" disabled={savingName}>
+              {savingName ? "Salvando..." : "Salvar nome"}
+            </Button>
+          </form>
+        </Card>
 
-        <form className="create-room-card" onSubmit={savePassword} noValidate>
-          <h2>Alterar senha</h2>
+        <Card className="rounded-2xl border-white/8 bg-card p-6">
+          <form onSubmit={savePassword} className="grid gap-4">
+            <h2 className="text-base font-semibold text-foreground">Alterar senha</h2>
 
-          <div className="field">
-            <label htmlFor="account-current-password">Senha atual</label>
-            <PasswordField
-              id="account-current-password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="account-current-password">Senha atual</Label>
+              <PasswordField
+                id="account-current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </div>
 
-          <div className="field">
-            <label htmlFor="account-new-password">Nova senha</label>
-            <PasswordField
-              id="account-new-password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="account-new-password">Nova senha</Label>
+              <PasswordField
+                id="account-new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+              />
+            </div>
 
-          <div className="field">
-            <label htmlFor="account-confirm-password">Confirmar nova senha</label>
-            <PasswordField
-              id="account-confirm-password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="account-confirm-password">Confirmar nova senha</Label>
+              <PasswordField
+                id="account-confirm-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </div>
 
-          {passwordSuccess ? <div className="success-banner">Senha alterada.</div> : null}
-          {passwordError ? <div className="error-banner inline">{passwordError}</div> : null}
+            {passwordSuccess ? (
+              <Alert className="border-success/25 bg-success/10 text-success">
+                <AlertDescription className="text-success/90">Senha alterada.</AlertDescription>
+              </Alert>
+            ) : null}
+            {passwordError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{passwordError}</AlertDescription>
+              </Alert>
+            ) : null}
 
-          <button className="primary-button" type="submit" disabled={savingPassword}>
-            {savingPassword ? "Salvando..." : "Salvar senha"}
-          </button>
-        </form>
+            <Button type="submit" className="h-11 w-full rounded-xl text-sm" disabled={savingPassword}>
+              {savingPassword ? "Salvando..." : "Salvar senha"}
+            </Button>
+          </form>
+        </Card>
       </div>
     </main>
   );

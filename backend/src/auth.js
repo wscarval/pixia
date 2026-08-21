@@ -12,6 +12,13 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET não configurado.");
 }
 
+// bcryptjs é puro JS (sem binding nativo), então roda no mesmo thread do
+// event loop do Node: cada hash trava a resposta de TODO mundo conectado
+// (incluindo o ping/sinalização WebRTC de outras salas) pelo tempo que leva
+// pra calcular. Custo 10 já é o mínimo recomendado pelo OWASP e cai pra 1/4
+// do tempo de bloqueio do custo 12 (cada +1 dobra o trabalho).
+const BCRYPT_COST = 10;
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_NAME_LENGTH = 4;
 const MIN_PASSWORD_LENGTH = 6;
@@ -128,7 +135,7 @@ router.post("/register", authLimiter, async (req, res) => {
   // resposta.
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
-    await bcrypt.hash(password, 12);
+    await bcrypt.hash(password, BCRYPT_COST);
     res.status(409).json({ ok: false, message: "Não foi possível criar a conta." });
     return;
   }
@@ -140,7 +147,7 @@ router.post("/register", authLimiter, async (req, res) => {
         id: crypto.randomUUID(),
         name,
         email,
-        passwordHash: await bcrypt.hash(password, 12),
+        passwordHash: await bcrypt.hash(password, BCRYPT_COST),
         avatarId: randomAvatarId(),
       },
     });
@@ -229,7 +236,7 @@ router.put("/password", requireAuth, authLimiter, async (req, res) => {
 
   await prisma.user.update({
     where: { id: req.user.id },
-    data: { passwordHash: await bcrypt.hash(newPassword, 12) },
+    data: { passwordHash: await bcrypt.hash(newPassword, BCRYPT_COST) },
   });
 
   res.json({ ok: true });

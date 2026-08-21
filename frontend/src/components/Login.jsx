@@ -3,6 +3,11 @@ import { Mail } from "lucide-react";
 import AuthLayout from "./AuthLayout.jsx";
 import PasswordField from "./PasswordField.jsx";
 import { saveSession } from "../lib/session.js";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { IconInput } from "@/components/ui/icon-input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -49,20 +54,29 @@ export default function Login({ onNavigate, onAuthenticated }) {
 
   return (
     <AuthLayout>
-      <form className="join-card" onSubmit={submit} noValidate>
-        <div className="brand-mark">
-          <img src="/pixia.png" alt="Pixia" />
-        </div>
-        <h1>Entrar na conta</h1>
-        <p className="muted">Acesse seu painel de links salvos.</p>
+      <Card className="w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 shadow-2xl backdrop-blur-xl">
+        <form onSubmit={submit} noValidate className="grid gap-5">
+          <div className="mx-auto aspect-video w-2/3 max-w-56">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+          </div>
 
-        {error ? <div className="error-banner inline">{error}</div> : null}
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Entrar na conta</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Acesse seu painel de links salvos.
+            </p>
+          </div>
 
-        <div className="field">
-          <label htmlFor="login-email">E-mail</label>
-          <div className="input-group">
-            <Mail size={16} />
-            <input
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label htmlFor="login-email">E-mail</Label>
+            <IconInput
+              icon={Mail}
               id="login-email"
               type="email"
               value={email}
@@ -72,33 +86,37 @@ export default function Login({ onNavigate, onAuthenticated }) {
               autoFocus
             />
           </div>
-        </div>
 
-        <div className="field">
-          <label htmlFor="login-password">Senha</label>
-          <PasswordField
-            id="login-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Sua senha"
-          />
-        </div>
+          <div className="grid gap-2">
+            <Label htmlFor="login-password">Senha</Label>
+            <PasswordField
+              id="login-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Sua senha"
+            />
+          </div>
 
-        <button className="primary-button" type="submit" disabled={loading}>
-          {loading ? "Entrando..." : "Entrar"}
-        </button>
+          <Button type="submit" size="lg" className="h-11 w-full rounded-xl text-sm" disabled={loading}>
+            {loading ? "Entrando..." : "Entrar"}
+          </Button>
 
-        <p className="auth-switch">
-          Ainda não tem conta?{" "}
-          <button type="button" onClick={() => onNavigate("/cadastro")}>
-            Criar conta
-          </button>
-        </p>
+          <p className="text-center text-sm text-muted-foreground">
+            Ainda não tem conta?{" "}
+            <button
+              type="button"
+              className="font-medium text-primary hover:underline"
+              onClick={() => onNavigate("/cadastro")}
+            >
+              Criar conta
+            </button>
+          </p>
 
-        <button type="button" className="link-button" onClick={() => onNavigate("/")}>
-          Voltar
-        </button>
-      </form>
+          <Button type="button" variant="link" className="mx-auto" onClick={() => onNavigate("/")}>
+            Voltar
+          </Button>
+        </form>
+      </Card>
     </AuthLayout>
   );
 }

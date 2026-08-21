@@ -13,6 +13,11 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET não configurado.");
 }
 
+// Ver o mesmo BCRYPT_COST em auth.js: bcryptjs bloqueia o event loop
+// inteiro do Node enquanto calcula, então o custo aqui afeta a latência de
+// TODA sala conectada nesse momento, não só quem está criando a sala.
+const BCRYPT_COST = 10;
+
 const MIN_PASSWORD_LENGTH = 6;
 const ANONYMOUS_ROOM_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ANONYMOUS_ROOMS_PER_IP = 3;
@@ -50,7 +55,7 @@ export function verifyRoomToken(token, slug) {
 }
 
 async function hashPasswordOrNull(password) {
-  return password ? bcrypt.hash(password, 12) : null;
+  return password ? bcrypt.hash(password, BCRYPT_COST) : null;
 }
 
 function isExpired(room) {

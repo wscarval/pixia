@@ -1,3 +1,13 @@
+export function sanitizeClientId(value) {
+  const clientId = String(value || "").trim();
+
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(clientId)) {
+    return null;
+  }
+
+  return clientId;
+}
+
 export function sanitizeRoomId(value) {
   const roomId = String(value || "").trim();
 

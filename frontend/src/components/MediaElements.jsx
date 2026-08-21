@@ -30,7 +30,7 @@ export function RemoteAudio({ stream, volume = 1 }) {
   return <audio ref={audioRef} autoPlay playsInline />;
 }
 
-export function StreamVideo({ stream, muted = false }) {
+export function StreamVideo({ stream, muted = false, volume = 1 }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -47,6 +47,13 @@ export function StreamVideo({ stream, muted = false }) {
       element.srcObject = null;
     };
   }, [stream]);
+
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element) return;
+
+    element.volume = Math.min(1, Math.max(0, volume));
+  }, [volume]);
 
   return <video ref={videoRef} autoPlay playsInline muted={muted} className="screen-video" />;
 }

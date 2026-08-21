@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  Clock,
   Copy,
   Globe,
+  HeadphoneOff,
+  Headphones,
   Link2,
   Lock,
   LogOut,
@@ -40,9 +43,21 @@ import {
   getToken,
   saveRoomSession,
 } from "./lib/session.js";
-import { getStoredParticipantVolume, setStoredParticipantVolume } from "./lib/preferences.js";
+import {
+  getPreferredScreenShareVolume,
+  getStoredParticipantVolume,
+  setPreferredScreenShareVolume,
+  setStoredParticipantVolume,
+} from "./lib/preferences.js";
 import { isElectronDesktop } from "./lib/electronAppAudio.js";
 import { randomGuestName } from "./lib/catNames.js";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { IconInput } from "@/components/ui/icon-input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 
 const AVATAR_PALETTE = [
   ["#8b5cf6", "#6d28d9"],
@@ -83,6 +98,16 @@ function avatarGradient(seed) {
 
   const [from, to] = AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
   return `linear-gradient(145deg, ${from}, ${to})`;
+}
+
+function formatCallDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
 }
 
 // As salas são sempre criadas pelo servidor (POST /api/rooms) — não geramos
@@ -186,29 +211,41 @@ function Landing({ onNavigate, currentUser }) {
 
   return (
     <AuthLayout>
-      <div className="join-card">
-        <div className="brand-mark">
-          <img src="/pixia.png" alt="Pixia" />
+      <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto aspect-video w-2/3 max-w-56">
+          <img src="/pixia.png" alt="Pixia" className="h-full w-full object-cover" />
         </div>
-        <h1>Começar uma sala</h1>
-        <p className="muted">Escolha como quer criar a sua.</p>
 
-        {error ? <div className="error-banner inline">{error}</div> : null}
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Começar uma sala
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Escolha como quer criar a sua.
+          </p>
+        </div>
 
-        <button
-          className="primary-button"
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <Button
           type="button"
+          size="lg"
+          className="h-11 w-full rounded-xl text-sm"
           onClick={handlePublic}
           disabled={creatingPublic}
         >
           {creatingPublic ? "Gerando..." : "Gerar sala pública aleatória"}
-        </button>
+        </Button>
 
         {!currentUser ? (
-          <p className="muted small">Salas particulares exigem conta.</p>
+          <p className="text-xs text-muted-foreground">Salas particulares exigem conta.</p>
         ) : showPrivateForm ? (
-          <form className="field" onSubmit={handlePrivateSubmit}>
-            <label htmlFor="landing-private-password">Senha da sala particular</label>
+          <form className="grid gap-2" onSubmit={handlePrivateSubmit}>
+            <Label htmlFor="landing-private-password">Senha da sala particular</Label>
             <PasswordField
               id="landing-private-password"
               value={privatePassword}
@@ -216,79 +253,105 @@ function Landing({ onNavigate, currentUser }) {
               placeholder={`Mínimo de ${MIN_ROOM_PASSWORD_LENGTH} caracteres`}
               autoFocus
             />
-            <button className="primary-button" type="submit" disabled={creatingPrivate}>
+            <Button
+              type="submit"
+              size="lg"
+              className="h-11 w-full rounded-xl text-sm"
+              disabled={creatingPrivate}
+            >
               {creatingPrivate ? "Criando..." : "Criar sala particular"}
-            </button>
+            </Button>
           </form>
         ) : (
-          <button
-            className="link-button"
-            type="button"
-            onClick={() => setShowPrivateForm(true)}
-          >
+          <Button type="button" variant="link" className="mx-auto" onClick={() => setShowPrivateForm(true)}>
             Criar sala particular
-          </button>
+          </Button>
         )}
 
-        <div className="landing-divider">
-          <span>ou</span>
+        <div className="relative flex items-center">
+          <Separator className="flex-1" />
+          <span className="px-3 text-xs text-muted-foreground">ou</span>
+          <Separator className="flex-1" />
         </div>
 
-        <form className="field" onSubmit={handlePasteSubmit}>
-          <label htmlFor="paste-link">Já tem um link?</label>
-          <div className="input-group">
-            <Link2 size={16} />
-            <input
-              id="paste-link"
-              value={pastedLink}
-              onChange={(event) => setPastedLink(event.target.value)}
-              placeholder="Cole o link da sala aqui"
-              maxLength={300}
-            />
-          </div>
-          {pasteError ? <span className="field-error">{pasteError}</span> : null}
-          <button className="primary-button" type="submit" disabled={!pastedLink.trim()}>
+        <form className="grid gap-2" onSubmit={handlePasteSubmit}>
+          <Label htmlFor="paste-link">Já tem um link?</Label>
+          <IconInput
+            icon={Link2}
+            id="paste-link"
+            value={pastedLink}
+            onChange={(event) => setPastedLink(event.target.value)}
+            placeholder="Cole o link da sala aqui"
+            maxLength={300}
+          />
+          {pasteError ? <span className="text-xs text-destructive">{pasteError}</span> : null}
+          <Button
+            type="submit"
+            size="lg"
+            className="h-11 w-full rounded-xl text-sm"
+            disabled={!pastedLink.trim()}
+          >
             Entrar no link
-          </button>
+          </Button>
         </form>
 
         {!currentUser ? (
-          <p className="auth-switch">
+          <p className="text-center text-sm text-muted-foreground">
             Já tem conta?{" "}
-            <button type="button" onClick={() => onNavigate("/entrar")}>
+            <button
+              type="button"
+              className="font-medium text-primary hover:underline"
+              onClick={() => onNavigate("/entrar")}
+            >
               Entrar
             </button>
             {" · "}
-            <button type="button" onClick={() => onNavigate("/cadastro")}>
+            <button
+              type="button"
+              className="font-medium text-primary hover:underline"
+              onClick={() => onNavigate("/cadastro")}
+            >
               Criar conta
             </button>
           </p>
         ) : (
-          <p className="auth-switch">
-            <button type="button" onClick={() => onNavigate("/painel")}>
+          <p className="text-center text-sm text-muted-foreground">
+            <button
+              type="button"
+              className="font-medium text-primary hover:underline"
+              onClick={() => onNavigate("/painel")}
+            >
               Meus links
             </button>
           </p>
         )}
 
         {!isElectronDesktop() ? (
-          <button type="button" className="link-button" onClick={() => onNavigate("/download")}>
+          <Button type="button" variant="link" className="mx-auto" onClick={() => onNavigate("/download")}>
             Baixar app desktop (Windows)
-          </button>
+          </Button>
         ) : null}
 
-        <p className="legal-notice">
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
           Ao continuar, você concorda com nossos{" "}
-          <button type="button" className="link-button inline" onClick={() => onNavigate("/termos")}>
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => onNavigate("/termos")}
+          >
             Termos de Uso
           </button>{" "}
           e com nossa{" "}
-          <button type="button" className="link-button inline" onClick={() => onNavigate("/privacidade")}>
+          <button
+            type="button"
+            className="text-primary hover:underline"
+            onClick={() => onNavigate("/privacidade")}
+          >
             Política de Privacidade
           </button>
           .
         </p>
-      </div>
+      </Card>
     </AuthLayout>
   );
 }
@@ -334,19 +397,23 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
   if (!checkingRoom && roomNotFound) {
     return (
       <AuthLayout>
-        <div className="join-card">
-          <div className="brand-mark">
-            <img src="/pixia.png" alt="Pixia" />
+        <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 shadow-2xl backdrop-blur-xl">
+          <div className="mx-auto aspect-video w-2/3 max-w-56">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
           </div>
-          <h1>Sala não encontrada</h1>
-          <p className="muted">
-            Este link não existe ou a sala já foi encerrada. Salas são sempre criadas pelo Pixia,
-            não é possível entrar num endereço digitado à mão.
-          </p>
-          <button className="primary-button" type="button" onClick={() => onNavigate("/")}>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Sala não encontrada
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Este link não existe ou a sala já foi encerrada. Salas são sempre criadas pelo Pixia,
+              não é possível entrar num endereço digitado à mão.
+            </p>
+          </div>
+          <Button size="lg" className="h-11 w-full rounded-xl text-sm" onClick={() => onNavigate("/")}>
             Criar uma sala nova
-          </button>
-        </div>
+          </Button>
+        </Card>
       </AuthLayout>
     );
   }
@@ -384,86 +451,113 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
 
   return (
     <AuthLayout>
-      <form className="join-card" onSubmit={submit}>
-        <div className="brand-mark">
-          <img src="/pixia.png" alt="Pixia" />
-        </div>
-        <h1>Entrar na conversa</h1>
-        <p className="muted">
-          {currentUser
-            ? "Confirme sua entrada nesta sala."
-            : "Você entra com um nome de visitante sorteado."}
-        </p>
-
-        <div className="room-preview">
-          <span>{roomLabel || "Sala"}</span>
-          <strong>/r/{roomId}</strong>
-        </div>
-
-        {!checkingRoom ? (
-          <div className={`room-visibility ${requiresPassword ? "private" : "public"}`}>
-            {requiresPassword ? <Lock size={12} /> : <Globe size={12} />}
-            {requiresPassword ? "Sala privada" : "Sala pública"}
+      <Card className="w-[min(420px,100%)] rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 shadow-2xl backdrop-blur-xl">
+        <form onSubmit={submit} className="grid gap-5">
+          <div className="mx-auto aspect-video w-2/3 max-w-56">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
           </div>
-        ) : null}
 
-        <div className="field">
-          <label htmlFor="display-name">Seu nome</label>
-          <div className="input-group">
-            <User size={16} />
-            <div id="display-name" className="static-value">
-              {displayName}
-            </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Entrar na conversa
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {currentUser
+                ? "Confirme sua entrada nesta sala."
+                : "Você entra com um nome de visitante sorteado."}
+            </p>
           </div>
-          {currentUser ? (
-            <span className="hint-text">
-              É o nome da sua conta. Pra mudar, acesse{" "}
-              <button type="button" className="link-button inline" onClick={() => onNavigate("/conta")}>
-                Minha conta
-              </button>
-              .
-            </span>
-          ) : (
-            <span className="hint-text">
-              Nome de visitante sorteado. Crie uma conta pra escolher o seu.
-            </span>
-          )}
-        </div>
 
-        {requiresPassword ? (
-          <div className="field">
-            <label htmlFor="room-password">Senha da sala</label>
-            <PasswordField
-              id="room-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Esta sala é privada"
-              autoFocus
+          <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/5 bg-muted px-4 py-3.5">
+            <span className="truncate text-sm text-muted-foreground">{roomLabel || "Sala"}</span>
+            <strong className="truncate text-sm font-semibold text-foreground">/r/{roomId}</strong>
+          </div>
+
+          {!checkingRoom ? (
+            <Badge
+              variant="outline"
+              className={
+                requiresPassword
+                  ? "gap-1.5 self-start border-primary/25 bg-primary/10 text-primary"
+                  : "gap-1.5 self-start border-success/25 bg-success/10 text-success"
+              }
+            >
+              {requiresPassword ? <Lock size={12} /> : <Globe size={12} />}
+              {requiresPassword ? "Sala privada" : "Sala pública"}
+            </Badge>
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label htmlFor="display-name">Seu nome</Label>
+            <IconInput
+              icon={User}
+              id="display-name"
+              value={displayName}
+              disabled
+              className="font-semibold text-foreground disabled:opacity-100"
             />
+            {currentUser ? (
+              <span className="text-xs text-muted-foreground">
+                É o nome da sua conta. Pra mudar, acesse{" "}
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => onNavigate("/conta")}
+                >
+                  Minha conta
+                </button>
+                .
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Nome de visitante sorteado. Crie uma conta pra escolher o seu.
+              </span>
+            )}
           </div>
-        ) : null}
 
-        {error ? <span className="field-error">{error}</span> : null}
+          {requiresPassword ? (
+            <div className="grid gap-2">
+              <Label htmlFor="room-password">Senha da sala</Label>
+              <PasswordField
+                id="room-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Esta sala é privada"
+                autoFocus
+              />
+            </div>
+          ) : null}
 
-        <button className="primary-button" type="submit" disabled={checkingRoom || submitting}>
-          {submitting ? "Entrando..." : "Entrar na sala"}
-        </button>
+          {error ? <span className="text-xs text-destructive">{error}</span> : null}
 
-        <p className="auth-switch">
-          {currentUser ? (
-            <button type="button" onClick={() => onNavigate("/painel")}>
-              Ver meus links
-            </button>
-          ) : (
-            <>
-              Ainda não tem conta?{" "}
-              <button type="button" onClick={() => onNavigate("/cadastro")}>
-                Criar conta
+          <Button type="submit" size="lg" className="h-11 w-full rounded-xl text-sm" disabled={checkingRoom || submitting}>
+            {submitting ? "Entrando..." : "Entrar na sala"}
+          </Button>
+
+          <p className="text-center text-sm text-muted-foreground">
+            {currentUser ? (
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={() => onNavigate("/painel")}
+              >
+                Ver meus links
               </button>
-            </>
-          )}
-        </p>
-      </form>
+            ) : (
+              <>
+                Ainda não tem conta?{" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => onNavigate("/cadastro")}
+                >
+                  Criar conta
+                </button>
+              </>
+            )}
+          </p>
+        </form>
+      </Card>
     </AuthLayout>
   );
 }
@@ -472,9 +566,19 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
   const [message, setMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // "Ensurdecer": silencia todo mundo de uma vez (mic dos outros + áudio da
+  // transmissão), sem sair da sala e sem mexer nos volumes individuais —
+  // eles voltam do jeito que estavam ao desativar.
+  const [deafened, setDeafened] = useState(false);
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [roomInfo, setRoomInfo] = useState(null);
   const [focusedShareId, setFocusedShareId] = useState(null);
+  const [screenShareVolume, setScreenShareVolume] = useState(getPreferredScreenShareVolume);
+
+  function changeScreenShareVolume(volume) {
+    setScreenShareVolume(volume);
+    setPreferredScreenShareVolume(volume);
+  }
   const stageRef = useRef(null);
 
   // Quem tem conta usa o avatar escolhido; visitante sem conta ganha um
@@ -532,9 +636,12 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
 
   const {
     connected,
+    supersededByTab,
     pingMs,
+    transport,
     participants,
     remoteMedia,
+    speakingIds,
     micEnabled,
     screenSharing,
     localScreenStream,
@@ -550,6 +657,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     changeScreenQuality,
     toggleScreenShare,
     sendMessage,
+    broadcastDeafened,
   } = useRoomWebRTC({ roomId, name, roomToken, avatarId: myAvatarId });
 
   // O roomToken guardado (ou o cadastro pra reentrada automática após um F5)
@@ -571,6 +679,33 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     ],
     [micEnabled, myAvatarId, name, participants, screenSharing]
   );
+
+  // Tempo total que a sala teve mais de uma pessoa junto (não reseta se
+  // cair pra 1 e voltar a subir — é o total acumulado da "chamada", não de
+  // cada trecho isolado). Só aparece a partir da segunda pessoa.
+  const multiPersonSinceRef = useRef(null);
+  const [callDurationLabel, setCallDurationLabel] = useState(null);
+
+  useEffect(() => {
+    if (allParticipants.length <= 1) return;
+    if (!multiPersonSinceRef.current) multiPersonSinceRef.current = Date.now();
+  }, [allParticipants.length]);
+
+  useEffect(() => {
+    if (allParticipants.length <= 1) {
+      setCallDurationLabel(null);
+      return;
+    }
+
+    const tick = () => {
+      if (!multiPersonSinceRef.current) return;
+      setCallDurationLabel(formatCallDuration(Date.now() - multiPersonSinceRef.current));
+    };
+
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [allParticipants.length]);
 
   const participantNameById = useMemo(
     () => Object.fromEntries(participants.map((participant) => [participant.id, participant.name])),
@@ -617,13 +752,15 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
 
   const connectionHealth = !connected
     ? { label: "Sem conexão", tone: "bad" }
-    : pingMs === null
-      ? { label: "Medindo...", tone: "unknown" }
-      : pingMs < 120
-        ? { label: "Boa conexão", tone: "good" }
-        : pingMs < 300
-          ? { label: "Conexão instável", tone: "ok" }
-          : { label: "Conexão ruim", tone: "bad" };
+    : participants.length === 0
+      ? { label: "Sozinho na sala", tone: "unknown" }
+      : pingMs === null
+        ? { label: "Medindo...", tone: "unknown" }
+        : pingMs < 120
+          ? { label: "Excelente conexão", tone: "good" }
+          : pingMs < 300
+            ? { label: "Conexão instável", tone: "ok" }
+            : { label: "Conexão péssima", tone: "bad" };
 
   async function copyRoom() {
     await navigator.clipboard.writeText(window.location.href);
@@ -646,6 +783,31 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     }
   }
 
+  if (supersededByTab) {
+    return (
+      <AuthLayout>
+        <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 text-center shadow-2xl backdrop-blur-xl">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Aberta em outra aba
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Nova janela foi aberta, então esta aqui foi desconectada
+              pra evitar entrar duas conexões na mesma sala.
+            </p>
+          </div>
+          <Button
+            size="lg"
+            className="h-11 w-full rounded-xl text-sm"
+            onClick={() => window.location.reload()}
+          >
+            Reconectar nesta aba
+          </Button>
+        </Card>
+      </AuthLayout>
+    );
+  }
+
   return (
     <main className="app-shell">
       {Object.entries(remoteMedia).map(([peerId, media]) =>
@@ -654,9 +816,11 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
             key={peerId}
             stream={media.audioStream}
             volume={
-              participantVolumes[peerId] ??
-              getStoredParticipantVolume(participantNameById[peerId]) ??
-              1
+              deafened
+                ? 0
+                : (participantVolumes[peerId] ??
+                  getStoredParticipantVolume(participantNameById[peerId]) ??
+                  1)
             }
           />
         ) : null
@@ -678,12 +842,25 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
               {connected ? <Wifi size={15} /> : <WifiOff size={15} />}
               {connected ? "Conectado" : "Reconectando"}
             </div>
-            <div className={`connection-health tone-${connectionHealth.tone}`}>
+            <div
+              className={`connection-health tone-${connectionHealth.tone}`}
+              title={
+                transport
+                  ? `Transporte: ${transport}${pingMs !== null ? ` · ${pingMs}ms` : ""}`
+                  : undefined
+              }
+            >
               <span className="health-dot" />
-              {pingMs !== null ? `${pingMs}ms · ` : ""}
               {connectionHealth.label}
             </div>
           </div>
+
+          {callDurationLabel ? (
+            <div className="call-duration" title="Tempo total com mais de 1 participante na sala">
+              <Clock size={13} />
+              {callDurationLabel}
+            </div>
+          ) : null}
         </div>
 
         <div className="topbar-actions">
@@ -718,6 +895,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
           <div className="participant-list">
             {allParticipants.map((participant) => {
               const isSelf = participant.id === "self";
+              const isSpeaking = speakingIds.has(participant.id);
               const volume =
                 participantVolumes[participant.id] ??
                 getStoredParticipantVolume(participant.name) ??
@@ -726,7 +904,10 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
               return (
                 <div className="participant" key={participant.id}>
                   <div className="participant-row">
-                    <div className="avatar" style={{ background: avatarGradient(participant.id) }}>
+                    <div
+                      className={`avatar${isSpeaking ? " speaking" : ""}`}
+                      style={{ background: avatarGradient(participant.id) }}
+                    >
                       <img
                         className="avatar-img"
                         src={catAvatarUrl(participant.avatarId ?? hashToAvatarId(participant.id))}
@@ -743,6 +924,13 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                     <div className="participant-icons">
                       {participant.screenSharing ? <MonitorUp size={15} /> : null}
                       {participant.micEnabled ? <Mic size={15} /> : <MicOff size={15} />}
+                      {(isSelf ? deafened : participant.deafened) ? (
+                        <HeadphoneOff
+                          size={15}
+                          className="deafened-icon"
+                          title={isSelf ? "Você ensurdeceu: não está ouvindo ninguém" : "Não está ouvindo ninguém agora"}
+                        />
+                      ) : null}
                     </div>
                   </div>
 
@@ -807,27 +995,54 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
               </div>
             ) : (
               <>
-                {activeShares.length > 1 ? (
-                  <div className="stage-selector">
-                    <MonitorUp size={14} />
-                    <select
-                      value={focusedShare?.id ?? ""}
-                      onChange={(event) => setFocusedShareId(event.target.value)}
-                      title="Escolher tela"
+                <div className="stage-selector">
+                  {activeShares.length > 1 ? (
+                    <>
+                      <MonitorUp size={14} />
+                      <select
+                        value={focusedShare?.id ?? ""}
+                        onChange={(event) => setFocusedShareId(event.target.value)}
+                        title="Escolher tela"
+                      >
+                        {activeShares.map((share) => (
+                          <option key={share.id} value={share.id}>
+                            {share.name}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : null}
+
+                  <div className="stage-volume">
+                    <button
+                      className="volume-mute"
+                      onClick={() => changeScreenShareVolume(screenShareVolume > 0 ? 0 : 1)}
+                      title={screenShareVolume > 0 ? "Silenciar transmissão" : "Ativar áudio da transmissão"}
                     >
-                      {activeShares.map((share) => (
-                        <option key={share.id} value={share.id}>
-                          {share.name}
-                        </option>
-                      ))}
-                    </select>
+                      {screenShareVolume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                    </button>
+                    <input
+                      type="range"
+                      className="volume-slider"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={screenShareVolume}
+                      onChange={(event) => changeScreenShareVolume(Number(event.target.value))}
+                      title={`Volume da transmissão: ${Math.round(screenShareVolume * 100)}%`}
+                    />
+                    <span className="volume-value">{Math.round(screenShareVolume * 100)}%</span>
                   </div>
-                ) : null}
+                </div>
 
                 <div className="share-grid shares-1">
                   {focusedShare ? (
                     <article className="share-card" key={focusedShare.id}>
-                      <StreamVideo stream={focusedShare.stream} muted={focusedShare.local} />
+                      <StreamVideo
+                        stream={focusedShare.stream}
+                        muted={focusedShare.local}
+                        volume={deafened ? 0 : screenShareVolume}
+                      />
                       <div className="share-label">
                         <span className="live-dot" />
                         {focusedShare.name} está compartilhando
@@ -846,6 +1061,23 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
               title={micEnabled ? "Desligar microfone" : "Ligar microfone"}
             >
               {micEnabled ? <Mic size={21} /> : <MicOff size={21} />}
+            </button>
+
+            <button
+              className={`round-control ${deafened ? "danger-soft" : "active"}`}
+              onClick={() => {
+                const next = !deafened;
+                setDeafened(next);
+                broadcastDeafened(next);
+                // Ensurdecer sem desligar o mic deixa a pessoa falando sem
+                // ouvir ninguém responder, o que atrapalha a conversa pros
+                // outros. Ao voltar a escutar, o mic continua desligado (tem
+                // que ligar de novo na mão), igual outros apps de chamada.
+                if (next && micEnabled) toggleMicrophone();
+              }}
+              title={deafened ? "Voltar a escutar todo mundo" : "Silenciar todo mundo (ensurdecer)"}
+            >
+              {deafened ? <HeadphoneOff size={21} /> : <Headphones size={21} />}
             </button>
 
             <select

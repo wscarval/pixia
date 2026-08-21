@@ -15,6 +15,8 @@ import {
   setPreferredScreenQuality,
 } from "../lib/preferences.js";
 import { playSoundEffect } from "../lib/soundEffects.js";
+import { watchSpeakingLevel } from "../lib/speakingDetector.js";
+import { getToken } from "../lib/session.js";
 
 export const ELECTRON_APP_PREFIX = "electron-app:";
 
@@ -42,10 +44,47 @@ function buildIceServers(turnServer) {
   return servers;
 }
 
+// Ping de verdade é o da mídia (o par de candidatos ICE em uso), não o do
+// canal de sinalização: o socket.io passa pelo Cloudflare/Nginx e pode levar
+// uma rota bem mais lenta que a conexão P2P/TURN da chamada em si, então
+// medir por ali mostrava um número que não refletia a qualidade da chamada.
+async function getConnectionRtt(pc) {
+  if (!pc || pc.connectionState !== "connected") return null;
+
+  try {
+    const stats = await pc.getStats();
+    for (const report of stats.values()) {
+      if (report.type === "candidate-pair" && report.state === "succeeded" && report.nominated) {
+        if (report.currentRoundTripTime != null) {
+          return Math.round(report.currentRoundTripTime * 1000);
+        }
+      }
+    }
+  } catch {
+    // getStats() pode falhar bem no meio de uma renegociação; tenta de novo no próximo tick.
+  }
+
+  return null;
+}
+
 export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const socketRef = useRef(null);
   const selfIdRef = useRef(null);
+  // Identifica essa aba (não essa pessoa) de forma estável entre
+  // reconexões automáticas do socket.io: numa rede instável, o cliente
+  // reconecta com um socket.id novo antes do servidor perceber que o
+  // antigo morreu, e sem isso a sala mostra a mesma pessoa duas vezes até
+  // o heartbeat expirar. Ver roomClientSockets no backend.
+  const clientIdRef = useRef(
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
   const peersRef = useRef(new Map());
+  // Toca o som de entrada só na primeira vez que a gente entra, não em
+  // reconexões automáticas depois de uma rede instável (senão o som toca de
+  // novo a cada reconexão, o que fica estranho).
+  const hasPlayedEnterSoundRef = useRef(false);
   const microphoneStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const screenAppAudioActiveRef = useRef(false);
@@ -55,10 +94,18 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   // remoto, só pra saber se um media-state é uma mudança de verdade (toca o
   // som) ou só o servidor confirmando um estado que já era esse.
   const remoteScreenSharingRef = useRef(new Map());
+  // "self" (mic local) + um por participante remoto que tem áudio chegando.
+  const speakingCleanupsRef = useRef(new Map());
+  const localSpeakingStreamRef = useRef(null);
 
   const [connected, setConnected] = useState(false);
+  // Igual a outra aba desse MESMO navegador (não da mesma rede, não da
+  // mesma conta) abriu essa sala e assumiu a presença. Ver o useEffect do
+  // BroadcastChannel mais abaixo.
+  const [supersededByTab, setSupersededByTab] = useState(false);
   const [participants, setParticipants] = useState([]);
   const [remoteMedia, setRemoteMedia] = useState({});
+  const [speakingIds, setSpeakingIds] = useState(() => new Set());
   const [micEnabled, setMicEnabled] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [localScreenStream, setLocalScreenStream] = useState(null);
@@ -68,6 +115,12 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const [appAudioSources, setAppAudioSources] = useState([]);
   const [selectedAudioInputId, setSelectedAudioInputId] = useState(getPreferredAudioInputId);
   const [pingMs, setPingMs] = useState(null);
+  // "websocket" ou "polling". Polling é um long-polling HTTP por baixo dos
+  // panos, bem mais lento por natureza (cada pacote é uma requisição HTTP
+  // inteira) — se o ping estiver alto e isso aqui disser "polling", o
+  // problema é o proxy na frente não estar repassando o Upgrade do
+  // websocket direito, não o app em si.
+  const [transport, setTransport] = useState(null);
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [screenQuality, setScreenQuality] = useState(screenQualityRef.current);
   const autoEnableMicRef = useRef(getPreferredMicEnabled());
@@ -78,6 +131,40 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     setScreenQuality(next);
     setPreferredScreenQuality(next);
   }, []);
+
+  const setSpeaking = useCallback((id, speaking) => {
+    setSpeakingIds((current) => {
+      const has = current.has(id);
+      if (speaking === has) return current;
+
+      const next = new Set(current);
+      if (speaking) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Reaplica o "está falando?" no stream certo do microfone local: chamado
+  // depois de ligar o mic (novo stream) ou trocar de dispositivo (outro
+  // stream novo). Só recria o observador se o stream mudou de verdade — só
+  // mutar/desmutar (.enabled) usa o mesmo stream, e uma track desabilitada
+  // já entrega silêncio ao analisador sozinha, sem precisar recriar nada.
+  const syncLocalSpeakingWatcher = useCallback(() => {
+    const currentStream = microphoneStreamRef.current;
+    if (localSpeakingStreamRef.current === currentStream) return;
+
+    speakingCleanupsRef.current.get("self")?.cleanup();
+    speakingCleanupsRef.current.delete("self");
+    localSpeakingStreamRef.current = currentStream;
+
+    if (!currentStream) {
+      setSpeaking("self", false);
+      return;
+    }
+
+    const cleanup = watchSpeakingLevel(currentStream, (speaking) => setSpeaking("self", speaking));
+    speakingCleanupsRef.current.set("self", { stream: currentStream, cleanup });
+  }, [setSpeaking]);
 
   const refreshAudioInputDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -148,6 +235,46 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, []);
+
+  // Evita "clones" de quem abre a mesma sala em várias abas DO MESMO
+  // navegador (BroadcastChannel só entrega mensagens dentro da mesma
+  // origem + mesmo perfil de navegador — nunca cruza pra outro dispositivo
+  // ou outro navegador na mesma rede, diferente de tentar resolver isso por
+  // IP). Cada aba anuncia um "carimbo" (timestamp) ao entrar; quem ouve um
+  // carimbo mais novo que o próprio cede a sala (desconecta, larga
+  // mic/tela) e mostra um aviso pra recarregar se quiser retomar aqui.
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined" || !roomId) return undefined;
+
+    const channel = new BroadcastChannel(`pixia-room-${roomId}`);
+    const myClaimTs = Date.now();
+    const myClientId = clientIdRef.current;
+
+    const theirsWins = (theirTs, theirClientId) =>
+      theirTs !== myClaimTs ? theirTs > myClaimTs : theirClientId > myClientId;
+
+    channel.onmessage = (event) => {
+      const { clientId: theirClientId, ts: theirTs } = event.data || {};
+      if (!theirClientId || theirClientId === myClientId) return;
+      if (!theirsWins(theirTs, theirClientId)) return;
+
+      setSupersededByTab(true);
+      socketRef.current?.disconnect();
+      microphoneStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      microphoneStreamRef.current = null;
+      screenStreamRef.current = null;
+      setMicEnabled(false);
+      setScreenSharing(false);
+      setLocalScreenStream(null);
+    };
+
+    channel.postMessage({ clientId: myClientId, ts: myClaimTs });
+
+    return () => {
+      channel.close();
+    };
+  }, [roomId]);
 
   // Retorna um MediaStream com uma faixa de áudio pronta para uso: um
   // microfone físico normalmente, ou — dentro do app desktop Electron — o
@@ -250,6 +377,14 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     };
 
     peersRef.current.set(peerId, peer);
+
+    // Canal de dados nunca usado (o chat vai por WebSocket, não por aqui):
+    // existe só pra garantir que o onnegotiationneeded dispare mesmo quando
+    // ninguém ligou mic nem tela ainda. Sem isso, dois participantes que só
+    // trocam áudio/tela depois de um tempo nunca negociam ICE/DTLS até lá, e
+    // o ping (que lê o candidate-pair do WebRTC) fica "Medindo..." pra
+    // sempre nesse meio tempo.
+    pc.createDataChannel("keepalive");
 
     const micTrack = microphoneStreamRef.current?.getAudioTracks()?.[0];
     if (micTrack) {
@@ -471,13 +606,31 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
     socketRef.current = socket;
 
-    const measurePing = () => {
-      if (!socket.connected) return;
-      const start = Date.now();
-      socket.emit("ping-check", () => {
-        if (!active) return;
-        setPingMs(Date.now() - start);
-      });
+    const trackTransport = () => {
+      if (!active) return;
+      setTransport(socket.io.engine?.transport?.name || null);
+    };
+
+    socket.io.on("open", () => {
+      trackTransport();
+      socket.io.engine.on("upgrade", trackTransport);
+    });
+
+    const measurePing = async () => {
+      const peers = Array.from(peersRef.current.values());
+      if (peers.length === 0) {
+        if (active) setPingMs(null);
+        return;
+      }
+
+      const rtts = (await Promise.all(peers.map((peer) => getConnectionRtt(peer.pc)))).filter(
+        (rtt) => rtt != null
+      );
+      if (!active) return;
+
+      setPingMs(
+        rtts.length > 0 ? Math.round(rtts.reduce((sum, rtt) => sum + rtt, 0) / rtts.length) : null
+      );
     };
 
     const pingInterval = window.setInterval(measurePing, 4000);
@@ -490,36 +643,56 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       setError("");
       measurePing();
 
-      socket.emit("join-room", { roomId, name, roomToken, avatarId }, (response) => {
-        if (!active) return;
+      socket.emit(
+        "join-room",
+        {
+          roomId,
+          name,
+          roomToken,
+          avatarId,
+          clientId: clientIdRef.current,
+          // Se logado, prova a identidade da conta pro servidor poder
+          // derrubar uma aba antiga da MESMA conta nessa sala (ver
+          // roomAccountSockets no backend) — abrir várias abas de propósito
+          // não devia criar "clones" da mesma pessoa na lista.
+          accountToken: getToken(),
+        },
+        (response) => {
+          if (!active) return;
 
-        if (!response?.ok) {
-          setError(response?.message || "Não foi possível entrar na sala.");
-          if (response?.requiresPassword) setRequiresPassword(true);
-          return;
+          if (!response?.ok) {
+            setError(response?.message || "Não foi possível entrar na sala.");
+            if (response?.requiresPassword) setRequiresPassword(true);
+            return;
+          }
+
+          setRequiresPassword(false);
+          selfIdRef.current = response.selfId;
+          const existing = response.participants || [];
+          setParticipants(existing);
+
+          if (!hasPlayedEnterSoundRef.current) {
+            hasPlayedEnterSoundRef.current = true;
+            playSoundEffect("enterRoom");
+          }
+
+          // Semeia com quem já estava compartilhando antes da gente entrar,
+          // pra não tocar o som de "começou a compartilhar" por engano no
+          // primeiro media-state deles depois que a gente chegou.
+          remoteScreenSharingRef.current = new Map(
+            existing.map((participant) => [participant.id, Boolean(participant.screenSharing)])
+          );
+
+          // Salas particulares guardam o histórico no banco; ao (re)conectar,
+          // o servidor manda de volta o que já foi trocado nesta sala.
+          if (response.messages) setMessages(response.messages);
+
+          // O novo participante inicia a conexão com quem já estava na sala.
+          existing.forEach((participant) => {
+            createPeer(participant.id);
+          });
         }
-
-        setRequiresPassword(false);
-        selfIdRef.current = response.selfId;
-        const existing = response.participants || [];
-        setParticipants(existing);
-
-        // Semeia com quem já estava compartilhando antes da gente entrar,
-        // pra não tocar o som de "começou a compartilhar" por engano no
-        // primeiro media-state deles depois que a gente chegou.
-        remoteScreenSharingRef.current = new Map(
-          existing.map((participant) => [participant.id, Boolean(participant.screenSharing)])
-        );
-
-        // Salas particulares guardam o histórico no banco; ao (re)conectar,
-        // o servidor manda de volta o que já foi trocado nesta sala.
-        if (response.messages) setMessages(response.messages);
-
-        // O novo participante inicia a conexão com quem já estava na sala.
-        existing.forEach((participant) => {
-          createPeer(participant.id);
-        });
-      });
+      );
     });
 
     socket.on("disconnect", () => {
@@ -527,6 +700,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
       setConnected(false);
       setPingMs(null);
+      setTransport(null);
       setParticipants([]);
       setRemoteMedia({});
       remoteScreenSharingRef.current.clear();
@@ -564,22 +738,26 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       removePeer(id);
     });
 
-    socket.on("media-state", ({ id, micEnabled: remoteMic, screenSharing: remoteScreen }) => {
-      if (!active) return;
+    socket.on(
+      "media-state",
+      ({ id, micEnabled: remoteMic, screenSharing: remoteScreen, deafened: remoteDeafened }) => {
+        if (!active) return;
 
-      if (typeof remoteScreen === "boolean") {
-        const wasSharing = remoteScreenSharingRef.current.get(id) ?? false;
-        if (remoteScreen !== wasSharing) {
-          remoteScreenSharingRef.current.set(id, remoteScreen);
-          playSoundEffect(remoteScreen ? "screenShare" : "stopScreenShare");
+        if (typeof remoteScreen === "boolean") {
+          const wasSharing = remoteScreenSharingRef.current.get(id) ?? false;
+          if (remoteScreen !== wasSharing) {
+            remoteScreenSharingRef.current.set(id, remoteScreen);
+            playSoundEffect(remoteScreen ? "screenShare" : "stopScreenShare");
+          }
         }
-      }
 
-      updateParticipant(id, {
-        micEnabled: remoteMic,
-        screenSharing: remoteScreen,
-      });
-    });
+        updateParticipant(id, {
+          micEnabled: remoteMic,
+          screenSharing: remoteScreen,
+          deafened: remoteDeafened,
+        });
+      }
+    );
 
     socket.on("chat-message", (chatMessage) => {
       if (!active) return;
@@ -625,6 +803,43 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     upsertParticipant,
   ]);
 
+  // Espelha remoteMedia num observador de fala por participante: cria um
+  // watcher quando um audioStream novo aparece, desliga quando o
+  // participante some ou troca de stream (evita vazar AudioContext).
+  useEffect(() => {
+    const activeIds = new Set();
+
+    Object.entries(remoteMedia).forEach(([peerId, media]) => {
+      const stream = media?.audioStream;
+      if (!stream) return;
+
+      activeIds.add(peerId);
+      const existing = speakingCleanupsRef.current.get(peerId);
+      if (existing?.stream === stream) return;
+
+      existing?.cleanup();
+      const cleanup = watchSpeakingLevel(stream, (speaking) => setSpeaking(peerId, speaking));
+      speakingCleanupsRef.current.set(peerId, { stream, cleanup });
+    });
+
+    speakingCleanupsRef.current.forEach((entry, id) => {
+      if (id === "self" || activeIds.has(id)) return;
+
+      entry.cleanup();
+      speakingCleanupsRef.current.delete(id);
+      setSpeaking(id, false);
+    });
+  }, [remoteMedia, setSpeaking]);
+
+  // Ao desmontar o hook (sair da sala de vez), desliga todos os
+  // observadores de fala que ainda estiverem de pé (local e remotos).
+  useEffect(() => {
+    return () => {
+      speakingCleanupsRef.current.forEach((entry) => entry.cleanup());
+      speakingCleanupsRef.current.clear();
+    };
+  }, []);
+
   const toggleMicrophone = useCallback(async () => {
     try {
       setError("");
@@ -644,6 +859,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         const stream = await openAudioInputStream(selectedAudioInputId || undefined);
 
         microphoneStreamRef.current = stream;
+        syncLocalSpeakingWatcher();
         const track = stream.getAudioTracks()[0];
         track.enabled = true;
 
@@ -663,6 +879,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
           // pegando o mic com prioridade exclusiva, headset Bluetooth
           // reconectando, etc. Limpar a ref força reabrir o getUserMedia.
           if (microphoneStreamRef.current === stream) microphoneStreamRef.current = null;
+          syncLocalSpeakingWatcher();
           setMicEnabled(false);
           socketRef.current?.emit("media-state", { micEnabled: false });
         };
@@ -691,7 +908,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
           : `Não foi possível acessar o microfone: ${mediaError.message}`
       );
     }
-  }, [openAudioInputStream, refreshAudioInputDevices, selectedAudioInputId]);
+  }, [openAudioInputStream, refreshAudioInputDevices, selectedAudioInputId, syncLocalSpeakingWatcher]);
 
   const changeAudioInput = useCallback(
     async (deviceId) => {
@@ -724,11 +941,13 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         });
 
         microphoneStreamRef.current = nextStream;
+        syncLocalSpeakingWatcher();
 
         nextTrack.onended = () => {
           // Mesmo motivo do outro onended, em toggleMicrophone: sem limpar a
           // ref, o próximo clique reaproveitaria uma track já morta.
           if (microphoneStreamRef.current === nextStream) microphoneStreamRef.current = null;
+          syncLocalSpeakingWatcher();
           setMicEnabled(false);
           socketRef.current?.emit("media-state", { micEnabled: false });
         };
@@ -737,7 +956,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
         setError(`Não foi possível trocar a entrada de áudio: ${deviceError.message}`);
       }
     },
-    [openAudioInputStream]
+    [openAudioInputStream, syncLocalSpeakingWatcher]
   );
 
   // Se o mic estava ligado da última vez, liga de novo sozinho ao entrar,
@@ -786,6 +1005,9 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     setLocalScreenStream(null);
     setScreenSharing(false);
     socketRef.current?.emit("media-state", { screenSharing: false });
+    // O servidor só avisa quem já estava na sala (ver socket.to(roomId) no
+    // backend) — sem isso, quem clica no botão não ouvia o próprio som.
+    playSoundEffect("stopScreenShare");
   }, []);
 
   const startScreenShare = useCallback(async () => {
@@ -808,7 +1030,18 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
           width: { ideal: preset.width },
           height: { ideal: preset.height },
         },
-        audio: true,
+        // Sem isso, o Chrome aplica o mesmo processamento de voz do
+        // microfone (cancelamento de eco, ganho automático) no áudio da
+        // tela/aba — que quase sempre é música, vídeo ou som de sistema, não
+        // voz. O resultado é exatamente o relatado: o ganho automático
+        // "bombeia" o volume pra baixo em trechos mais altos, e o
+        // cancelamento de eco corta/distorce pedaços sem eco nenhum pra
+        // cancelar.
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
       });
 
       const track = stream.getVideoTracks()[0];
@@ -856,6 +1089,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
       setScreenSharing(true);
       socketRef.current?.emit("media-state", { screenSharing: true });
+      playSoundEffect("screenShare");
     } catch (screenError) {
       // No app desktop Electron, cancelar o seletor próprio de tela (ver
       // electron/src/main.js) não rejeita com NotAllowedError como no
@@ -887,11 +1121,21 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     socketRef.current?.emit("chat-message", { message: clean });
   }, []);
 
+  // Ensurdecer é um controle só de exibição local (não muda nada no
+  // WebRTC), mas o resto da sala precisa saber que essa pessoa não está
+  // ouvindo ninguém agora — só avisa o servidor, quem decide o volume de
+  // verdade continua sendo o próprio App.jsx.
+  const broadcastDeafened = useCallback((deafened) => {
+    socketRef.current?.emit("media-state", { deafened });
+  }, []);
+
   return {
     connected,
+    supersededByTab,
     pingMs,
     participants,
     remoteMedia,
+    speakingIds,
     micEnabled,
     screenSharing,
     localScreenStream,
@@ -907,5 +1151,6 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     changeScreenQuality,
     toggleScreenShare,
     sendMessage,
+    broadcastDeafened,
   };
 }

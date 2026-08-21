@@ -1,15 +1,43 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import express from "express";
+import jwt from "jsonwebtoken";
 import { Server } from "socket.io";
 import authRouter from "./auth.js";
 import roomsRouter, { verifyRoomToken, findLiveRoomBySlug } from "./rooms.js";
 import prisma from "./db.js";
-import { sanitizeRoomId, sanitizeName, sanitizeMessage, sanitizeAvatarId } from "./sanitize.js";
+import {
+  sanitizeRoomId,
+  sanitizeName,
+  sanitizeMessage,
+  sanitizeAvatarId,
+  sanitizeClientId,
+} from "./sanitize.js";
 
 const app = express();
 const server = http.createServer(app);
 const PORT = Number(process.env.PORT || 3001);
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET não configurado.");
+}
+
+// Extrai o id da conta de um token de login (mesmo formato emitido em
+// auth.js), sem bater no banco — só confere a assinatura, igual
+// verifyRoomToken em rooms.js. null pra visitante anônimo ou token
+// ausente/inválido/expirado (sem lançar erro, entra como anônimo mesmo).
+function verifyAccountToken(token) {
+  if (!token) return null;
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
 
 app.disable("x-powered-by");
 // Confia em exatamente 1 hop de proxy (o Nginx, único jeito de chegar aqui
@@ -97,6 +125,33 @@ const io = new Server(server, {
   pingTimeout: 20000,
 });
 
+// Numa conexão instável, o socket.io do cliente reconecta sozinho (novo
+// socket.id) bem antes do servidor perceber que o socket antigo morreu: o
+// heartbeat só desiste depois de pingInterval + pingTimeout (até 45s aqui).
+// Nesse meio tempo, a mesma aba aparece na sala duas vezes (a antiga
+// zumbi + a nova). Esse mapa rastreia "essa aba (clientId) já tem um
+// socket nessa sala?" pra derrubar o antigo na hora, assim que o novo
+// chega, em vez de esperar o timeout.
+const roomClientSockets = new Map();
+
+function roomClientKey(roomId, clientId) {
+  return roomId && clientId ? `${roomId}:${clientId}` : null;
+}
+
+// Mesma ideia do mapa acima, mas pra "essa CONTA já tem um socket nessa
+// sala?" em vez de "essa ABA". clientId sozinho não pega o caso de alguém
+// abrir várias abas de propósito (cada aba tem um clientId novo, então
+// nenhuma delas parece uma reconexão) — seriam vários "clones" da mesma
+// pessoa na lista de participantes. Só existe pra quem está logado: é a
+// única identidade que dá pra confirmar de verdade (assinatura do JWT), sem
+// isso um visitante anônimo não tem como provar "sou a mesma pessoa da
+// outra aba" com segurança.
+const roomAccountSockets = new Map();
+
+function roomAccountKey(roomId, accountUserId) {
+  return roomId && accountUserId ? `${roomId}:${accountUserId}` : null;
+}
+
 // Limite de mensagens por socket (não por IP: cada conexão já representa um
 // participante numa sala). Evita inundar a sala de mensagens e, pra salas
 // particulares, evita amplificar isso em escritas no banco.
@@ -130,6 +185,7 @@ async function getRoomParticipants(roomId, ignoreSocketId = null) {
       avatarId: client.data.avatarId || null,
       micEnabled: Boolean(client.data.micEnabled),
       screenSharing: Boolean(client.data.screenSharing),
+      deafened: Boolean(client.data.deafened),
     }));
 }
 
@@ -175,20 +231,60 @@ io.on("connection", (socket) => {
         await socket.leave(socket.data.roomId);
       }
 
+      // Reconexão da mesma aba (mesmo clientId) numa rede instável: o
+      // socket antigo ainda pode estar "vivo" pro servidor (heartbeat não
+      // estourou ainda). Derruba ele agora, antes de montar a lista de
+      // participantes, pra ninguém ver a mesma pessoa duas vezes.
+      const clientId = sanitizeClientId(payload.clientId);
+      const dedupeKey = roomClientKey(roomId, clientId);
+      if (dedupeKey) {
+        const staleSocketId = roomClientSockets.get(dedupeKey);
+        if (staleSocketId && staleSocketId !== socket.id) {
+          io.sockets.sockets.get(staleSocketId)?.disconnect(true);
+          if (roomClientSockets.get(dedupeKey) === staleSocketId) {
+            roomClientSockets.delete(dedupeKey);
+          }
+        }
+      }
+
+      // Mesma conta logada abrindo uma segunda aba/janela nessa sala: aqui
+      // não é reconexão (clientId é outro), é a mesma pessoa de propósito.
+      // Derruba a aba antiga — a nova "assume" a presença na sala, como a
+      // maioria dos apps de chamada faz.
+      const accountUserId = verifyAccountToken(payload.accountToken);
+      const accountKey = roomAccountKey(roomId, accountUserId);
+      if (accountKey) {
+        const staleSocketId = roomAccountSockets.get(accountKey);
+        if (staleSocketId && staleSocketId !== socket.id) {
+          io.sockets.sockets.get(staleSocketId)?.disconnect(true);
+          if (roomAccountSockets.get(accountKey) === staleSocketId) {
+            roomAccountSockets.delete(accountKey);
+          }
+        }
+      }
+
       const existingParticipants = await getRoomParticipants(roomId, socket.id);
 
       socket.data.roomId = roomId;
       socket.data.roomDbId = persistedRoom.id;
       socket.data.roomIsPrivate = Boolean(persistedRoom.passwordHash);
       socket.data.name = name;
+      socket.data.clientId = clientId;
+      socket.data.accountUserId = accountUserId;
       // Da conta (se logado) ou sorteado no cliente (se anônimo) — o
       // servidor só repassa pros outros participantes, não decide o valor.
       socket.data.avatarId = sanitizeAvatarId(payload.avatarId);
       socket.data.micEnabled = false;
       socket.data.screenSharing = false;
+      socket.data.deafened = false;
 
       await socket.join(roomId);
-
+      if (dedupeKey) {
+        roomClientSockets.set(dedupeKey, socket.id);
+      }
+      if (accountKey) {
+        roomAccountSockets.set(accountKey, socket.id);
+      }
       // Salas particulares guardam o histórico de chat no banco (ver
       // chat-message abaixo) justamente para poder devolvê-lo aqui e não
       // perder as mensagens quando alguém recarrega a página.
@@ -221,6 +317,7 @@ io.on("connection", (socket) => {
         avatarId: socket.data.avatarId,
         micEnabled: false,
         screenSharing: false,
+        deafened: false,
       });
 
       console.log(`[room:${roomId}] ${name} entrou (${socket.id})`);
@@ -252,7 +349,7 @@ io.on("connection", (socket) => {
     callback();
   });
 
-  socket.on("media-state", ({ micEnabled, screenSharing } = {}) => {
+  socket.on("media-state", ({ micEnabled, screenSharing, deafened } = {}) => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
 
@@ -264,10 +361,15 @@ io.on("connection", (socket) => {
       socket.data.screenSharing = screenSharing;
     }
 
+    if (typeof deafened === "boolean") {
+      socket.data.deafened = deafened;
+    }
+
     socket.to(roomId).emit("media-state", {
       id: socket.id,
       micEnabled: Boolean(socket.data.micEnabled),
       screenSharing: Boolean(socket.data.screenSharing),
+      deafened: Boolean(socket.data.deafened),
     });
   });
 
@@ -307,6 +409,16 @@ io.on("connection", (socket) => {
   socket.on("disconnecting", () => {
     const roomId = socket.data.roomId;
     if (!roomId) return;
+
+    const dedupeKey = roomClientKey(roomId, socket.data.clientId);
+    if (dedupeKey && roomClientSockets.get(dedupeKey) === socket.id) {
+      roomClientSockets.delete(dedupeKey);
+    }
+
+    const accountKey = roomAccountKey(roomId, socket.data.accountUserId);
+    if (accountKey && roomAccountSockets.get(accountKey) === socket.id) {
+      roomAccountSockets.delete(accountKey);
+    }
 
     socket.to(roomId).emit("user-left", {
       id: socket.id,

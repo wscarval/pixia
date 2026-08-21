@@ -55,6 +55,17 @@ export function setPreferredScreenQuality(quality) {
   writeAll(prefs);
 }
 
+export function getPreferredScreenShareVolume() {
+  const value = readAll().screenShareVolume;
+  return typeof value === "number" && value >= 0 && value <= 1 ? value : 1;
+}
+
+export function setPreferredScreenShareVolume(volume) {
+  const prefs = readAll();
+  prefs.screenShareVolume = Math.min(1, Math.max(0, volume));
+  writeAll(prefs);
+}
+
 export function getStoredParticipantVolume(name) {
   const volumes = readAll().participantVolumes || {};
   const key = normalizeName(name);

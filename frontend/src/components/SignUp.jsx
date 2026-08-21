@@ -3,6 +3,11 @@ import { Mail, User } from "lucide-react";
 import AuthLayout from "./AuthLayout.jsx";
 import PasswordField from "./PasswordField.jsx";
 import { saveSession } from "../lib/session.js";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { IconInput } from "@/components/ui/icon-input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_NAME_LENGTH = 4;
@@ -71,21 +76,36 @@ export default function SignUp({ onNavigate, onAuthenticated }) {
 
   return (
     <AuthLayout>
-      <form className="join-card" onSubmit={submit} noValidate>
-        <div className="brand-mark">
-          <img src="/pixia.png" alt="Pixia" />
-        </div>
-        <h1>Criar conta</h1>
-        <p className="muted">Crie sua conta para organizar e acessar suas salas.</p>
+      <Card className="w-[min(420px,100%)] rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 shadow-2xl backdrop-blur-xl">
+        <form onSubmit={submit} noValidate className="grid gap-5">
+          <div className="mx-auto aspect-video w-2/3 max-w-56">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+          </div>
 
-        {success ? <div className="success-banner">Conta criada! Redirecionando...</div> : null}
-        {submitError ? <div className="error-banner inline">{submitError}</div> : null}
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Criar conta</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Crie sua conta para organizar e acessar suas salas.
+            </p>
+          </div>
 
-        <div className="field">
-          <label htmlFor="signup-name">Nome</label>
-          <div className="input-group">
-            <User size={16} />
-            <input
+          {success ? (
+            <Alert className="border-success/25 bg-success/10 text-success">
+              <AlertDescription className="text-success/90">
+                Conta criada! Redirecionando...
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {submitError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{submitError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="grid gap-2">
+            <Label htmlFor="signup-name">Nome</Label>
+            <IconInput
+              icon={User}
               id="signup-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -93,15 +113,13 @@ export default function SignUp({ onNavigate, onAuthenticated }) {
               maxLength={60}
               autoFocus
             />
+            {errors.name ? <span className="text-xs text-destructive">{errors.name}</span> : null}
           </div>
-          {errors.name ? <span className="field-error">{errors.name}</span> : null}
-        </div>
 
-        <div className="field">
-          <label htmlFor="signup-email">E-mail</label>
-          <div className="input-group">
-            <Mail size={16} />
-            <input
+          <div className="grid gap-2">
+            <Label htmlFor="signup-email">E-mail</Label>
+            <IconInput
+              icon={Mail}
               id="signup-email"
               type="email"
               value={email}
@@ -109,61 +127,73 @@ export default function SignUp({ onNavigate, onAuthenticated }) {
               placeholder="bigodes@pixia.com"
               maxLength={190}
             />
+            {errors.email ? <span className="text-xs text-destructive">{errors.email}</span> : null}
           </div>
-          {errors.email ? <span className="field-error">{errors.email}</span> : null}
-        </div>
 
-        <div className="field">
-          <label htmlFor="signup-password">Senha</label>
-          <PasswordField
-            id="signup-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
-          />
-          {errors.password ? <span className="field-error">{errors.password}</span> : null}
-        </div>
+          <div className="grid gap-2">
+            <Label htmlFor="signup-password">Senha</Label>
+            <PasswordField
+              id="signup-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+            />
+            {errors.password ? <span className="text-xs text-destructive">{errors.password}</span> : null}
+          </div>
 
-        <div className="field">
-          <label htmlFor="signup-confirm-password">Confirmar senha</label>
-          <PasswordField
-            id="signup-confirm-password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            placeholder="Repita a senha"
-          />
-          {errors.confirmPassword ? (
-            <span className="field-error">{errors.confirmPassword}</span>
-          ) : null}
-        </div>
+          <div className="grid gap-2">
+            <Label htmlFor="signup-confirm-password">Confirmar senha</Label>
+            <PasswordField
+              id="signup-confirm-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Repita a senha"
+            />
+            {errors.confirmPassword ? (
+              <span className="text-xs text-destructive">{errors.confirmPassword}</span>
+            ) : null}
+          </div>
 
-        <button className="primary-button" type="submit" disabled={loading}>
-          {loading ? "Criando conta..." : "Criar conta"}
-        </button>
+          <Button type="submit" size="lg" className="h-11 w-full rounded-xl text-sm" disabled={loading}>
+            {loading ? "Criando conta..." : "Criar conta"}
+          </Button>
 
-        <p className="legal-notice">
-          Ao continuar, você concorda com nossos{" "}
-          <button type="button" className="link-button inline" onClick={() => onNavigate("/termos")}>
-            Termos de Uso
-          </button>{" "}
-          e com nossa{" "}
-          <button type="button" className="link-button inline" onClick={() => onNavigate("/privacidade")}>
-            Política de Privacidade
-          </button>
-          .
-        </p>
+          <p className="text-center text-xs leading-relaxed text-muted-foreground">
+            Ao continuar, você concorda com nossos{" "}
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={() => onNavigate("/termos")}
+            >
+              Termos de Uso
+            </button>{" "}
+            e com nossa{" "}
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={() => onNavigate("/privacidade")}
+            >
+              Política de Privacidade
+            </button>
+            .
+          </p>
 
-        <p className="auth-switch">
-          Já tem conta?{" "}
-          <button type="button" onClick={() => onNavigate("/entrar")}>
-            Entrar
-          </button>
-        </p>
+          <p className="text-center text-sm text-muted-foreground">
+            Já tem conta?{" "}
+            <button
+              type="button"
+              className="font-medium text-primary hover:underline"
+              onClick={() => onNavigate("/entrar")}
+            >
+              Entrar
+            </button>
+          </p>
 
-        <button type="button" className="link-button" onClick={() => onNavigate("/")}>
-          Voltar
-        </button>
-      </form>
+          <Button type="button" variant="link" className="mx-auto" onClick={() => onNavigate("/")}>
+            Voltar
+          </Button>
+        </form>
+      </Card>
     </AuthLayout>
   );
 }

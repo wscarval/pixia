@@ -10,7 +10,11 @@
       "Bash(curl -s -X POST http://localhost:3099/api/auth/register -H \"Content-Type: application/json\" -d '{\"name\":\"X\",\"email\":\"x@example.com\",\"password\":\"123\"}')",
       "Bash(taskkill //F //PID 70084)",
       "Bash(rm -rf ./data-test)",
-      "Bash(docker --version)"
+      "Bash(docker --version)",
+      "Bash(npx shadcn@latest init --help)",
+      "Bash(npx shadcn@latest init -t vite -p base-nova -b radix -y --no-rtl --no-pointer)",
+      "Bash(timeout 15 npx shadcn@latest init -t vite -y)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }
