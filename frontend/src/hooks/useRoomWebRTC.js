@@ -384,7 +384,17 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     // trocam áudio/tela depois de um tempo nunca negociam ICE/DTLS até lá, e
     // o ping (que lê o candidate-pair do WebRTC) fica "Medindo..." pra
     // sempre nesse meio tempo.
-    pc.createDataChannel("keepalive");
+    //
+    // Só o lado "impolite" cria o canal: um canal criado por QUALQUER um dos
+    // dois lados já estabelece o transporte SCTP pra ambos (não precisa dos
+    // dois lados criando). Quando os dois criavam ao mesmo tempo (o caso
+    // comum de "alguém já compartilhando tela quando um novo participante
+    // entra"), dava glare logo na primeira negociação e o Chrome falhava com
+    // "Failed to start SCTP transport" ao processar a segunda oferta — o
+    // participante novo nunca recebia a tela de quem já estava compartilhando.
+    if (!peer.polite) {
+      pc.createDataChannel("keepalive");
+    }
 
     const micTrack = microphoneStreamRef.current?.getAudioTracks()?.[0];
     if (micTrack) {
@@ -1046,6 +1056,17 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
       const track = stream.getVideoTracks()[0];
       let audioTrack = stream.getAudioTracks()[0];
+
+      // Sem isso, o encoder pode preferir manter a resolução e sacrificar
+      // frames quando a CPU aperta (comportamento padrão "balanced"/
+      // "maintain-resolution" do WebRTC) — no Electron, sem aceleração de
+      // hardware disponível pro encoder tão facilmente quanto num navegador
+      // normal, isso acontece com muito mais frequência, e o efeito
+      // observado é "perde FPS". "motion" faz o RTCRtpSender usar
+      // degradationPreference "maintain-framerate" automaticamente (ver
+      // MediaStreamTrack Content Hints, W3C): quando aperta, reduz
+      // resolução antes de derrubar frames, não o contrário.
+      track.contentHint = "motion";
 
       // No app desktop Electron, compartilhar uma janela específica (não a
       // tela inteira) não usa o loopback de áudio do sistema inteiro — ver

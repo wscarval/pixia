@@ -912,6 +912,13 @@ button {
   font-size: 10px;
 }
 
+.participant-copy span.participant-sharing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #fca5a5;
+}
+
 .participant-icons {
   display: flex;
   gap: 5px;
@@ -1074,21 +1081,6 @@ button {
   display: block;
   object-fit: contain;
   background: black;
-}
-
-.share-label {
-  position: absolute;
-  left: 12px;
-  top: 12px;
-  padding: 7px 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
-  background: rgba(0, 0, 0, 0.66);
-  backdrop-filter: blur(12px);
-  font-size: 11px;
 }
 
 .live-dot {

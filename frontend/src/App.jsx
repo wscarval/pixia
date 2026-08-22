@@ -920,9 +920,17 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                         {isSelf ? "Você · " : ""}
                         {participant.micEnabled ? "Microfone ativo" : "Microfone desligado"}
                       </span>
+                      {participant.screenSharing ? (
+                        <span className="participant-sharing">
+                          <span className="live-dot" />
+                          Compartilhando tela
+                        </span>
+                      ) : null}
                     </div>
                     <div className="participant-icons">
-                      {participant.screenSharing ? <MonitorUp size={15} /> : null}
+                      {participant.screenSharing ? (
+                        <MonitorUp size={15} title="Compartilhando tela" />
+                      ) : null}
                       {participant.micEnabled ? <Mic size={15} /> : <MicOff size={15} />}
                       {(isSelf ? deafened : participant.deafened) ? (
                         <HeadphoneOff
@@ -1043,10 +1051,6 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                         muted={focusedShare.local}
                         volume={deafened ? 0 : screenShareVolume}
                       />
-                      <div className="share-label">
-                        <span className="live-dot" />
-                        {focusedShare.name} está compartilhando
-                      </div>
                     </article>
                   ) : null}
                 </div>
