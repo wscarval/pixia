@@ -1,7 +1,22 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Globe, Home, Lock, LogOut, Plus, Trash2, Unlock, User } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Copy,
+  Globe,
+  History,
+  Home,
+  Lock,
+  LogOut,
+  Plus,
+  Trash2,
+  Unlock,
+  User,
+  Users,
+} from "lucide-react";
 import PasswordField from "./PasswordField.jsx";
 import { authFetch, clearSession } from "../lib/session.js";
+import { fetchCreatedRooms, fetchVisitedRooms } from "../lib/roomsApi.js";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +97,13 @@ function RoomRow({ room, onDelete, onUpdatePassword }) {
           {room.isPublic ? <Globe size={13} /> : <Lock size={13} />}
           {room.isPublic ? "Público" : "Privado"}
         </Badge>
+
+        {room.participantCount > 0 ? (
+          <Badge variant="outline" className="gap-1.5 border-white/10 text-muted-foreground">
+            <Users size={13} />
+            {room.participantCount}
+          </Badge>
+        ) : null}
 
         <div className="mr-auto min-w-0">
           <strong className="block truncate text-sm font-semibold text-foreground">
@@ -174,10 +196,53 @@ function RoomRow({ room, onDelete, onUpdatePassword }) {
   );
 }
 
+// Sala de outra pessoa que essa conta já entrou (não tem senha/exclusão
+// pra gerenciar aqui, só entrar de novo).
+function VisitedRoomRow({ room, onNavigate }) {
+  return (
+    <Card className="gap-3 rounded-2xl border-white/8 bg-card p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge
+          variant="outline"
+          className={
+            room.isPublic
+              ? "gap-1.5 border-success/25 bg-success/10 text-success"
+              : "gap-1.5 border-primary/25 bg-primary/10 text-primary"
+          }
+        >
+          {room.isPublic ? <Globe size={13} /> : <Lock size={13} />}
+          {room.isPublic ? "Público" : "Privado"}
+        </Badge>
+
+        {room.participantCount > 0 ? (
+          <Badge variant="outline" className="gap-1.5 border-white/10 text-muted-foreground">
+            <Users size={13} />
+            {room.participantCount}
+          </Badge>
+        ) : null}
+
+        <div className="mr-auto min-w-0">
+          <strong className="block truncate text-sm font-semibold text-foreground">
+            {room.name || "Sala sem nome"}
+          </strong>
+          <span className="block truncate text-xs text-muted-foreground">/r/{room.slug}</span>
+        </div>
+
+        <Button variant="ghost" size="icon" onClick={() => onNavigate(`/r/${room.slug}`)} title="Entrar na sala">
+          <ArrowRight size={15} />
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export default function LinksPanel({ user, onNavigate, onLogout }) {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
+  const [visitedRooms, setVisitedRooms] = useState([]);
+  const [visitedLoading, setVisitedLoading] = useState(true);
 
   const [newName, setNewName] = useState("");
   const [makePrivate, setMakePrivate] = useState(false);
@@ -185,25 +250,46 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
 
-  async function loadRooms() {
-    setLoading(true);
-    setLoadError("");
+  async function loadRooms(options = {}) {
+    const { silent = false } = options;
+    if (!silent) {
+      setLoading(true);
+      setLoadError("");
+    }
     try {
-      const { response, data } = await authFetch("/api/rooms");
-      if (!response.ok || !data?.ok) {
-        setLoadError(data?.message || "Não foi possível carregar seus links.");
-        return;
-      }
-      setRooms(data.rooms);
-    } catch {
-      setLoadError("Falha ao conectar ao servidor.");
+      const data = await fetchCreatedRooms();
+      setRooms(data);
+    } catch (error) {
+      if (!silent) setLoadError(error.message || "Falha ao conectar ao servidor.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  }
+
+  async function loadVisitedRooms(options = {}) {
+    const { silent = false } = options;
+    if (!silent) setVisitedLoading(true);
+    try {
+      setVisitedRooms(await fetchVisitedRooms());
+    } catch {
+      // Silencioso: essa lista é secundária, não acumula outro banner de erro.
+    } finally {
+      if (!silent) setVisitedLoading(false);
     }
   }
 
   useEffect(() => {
     loadRooms();
+    loadVisitedRooms();
+
+    // Sem socket dedicado pra isso aqui: mantém a contagem de participantes
+    // "ao vivo" só buscando as duas listas de novo enquanto o painel está aberto.
+    const interval = window.setInterval(() => {
+      loadRooms({ silent: true });
+      loadVisitedRooms({ silent: true });
+    }, 10000);
+
+    return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -375,6 +461,21 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
           ))}
         </div>
       </div>
+
+      {visitedRooms.length > 0 || visitedLoading ? (
+        <div className="grid gap-3 px-6 pb-6">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <History size={17} />
+            Salas acessadas de outros usuários
+          </h2>
+
+          {visitedLoading ? <p className="text-sm text-muted-foreground">Carregando...</p> : null}
+
+          {visitedRooms.map((room) => (
+            <VisitedRoomRow key={room.id} room={room} onNavigate={onNavigate} />
+          ))}
+        </div>
+      ) : null}
     </main>
   );
 }

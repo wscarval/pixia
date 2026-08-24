@@ -4,13 +4,15 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { Server } from "socket.io";
 import authRouter from "./auth.js";
-import roomsRouter, { verifyRoomToken, findLiveRoomBySlug } from "./rooms.js";
+import roomsRouter, { verifyRoomToken, findLiveRoomBySlug, recordRoomVisit } from "./rooms.js";
+import { setIo } from "./presence.js";
 import prisma from "./db.js";
 import {
   sanitizeRoomId,
   sanitizeName,
   sanitizeMessage,
   sanitizeAvatarId,
+  sanitizeAvatarUrl,
   sanitizeClientId,
 } from "./sanitize.js";
 
@@ -125,6 +127,8 @@ const io = new Server(server, {
   pingTimeout: 20000,
 });
 
+setIo(io);
+
 // Numa conexão instável, o socket.io do cliente reconecta sozinho (novo
 // socket.id) bem antes do servidor perceber que o socket antigo morreu: o
 // heartbeat só desiste depois de pingInterval + pingTimeout (até 45s aqui).
@@ -183,6 +187,7 @@ async function getRoomParticipants(roomId, ignoreSocketId = null) {
       id: client.id,
       name: client.data.name || "Usuário",
       avatarId: client.data.avatarId || null,
+      avatarUrl: client.data.avatarUrl || null,
       micEnabled: Boolean(client.data.micEnabled),
       screenSharing: Boolean(client.data.screenSharing),
       deafened: Boolean(client.data.deafened),
@@ -267,13 +272,15 @@ io.on("connection", (socket) => {
 
       socket.data.roomId = roomId;
       socket.data.roomDbId = persistedRoom.id;
-      socket.data.roomIsPrivate = Boolean(persistedRoom.passwordHash);
       socket.data.name = name;
       socket.data.clientId = clientId;
       socket.data.accountUserId = accountUserId;
       // Da conta (se logado) ou sorteado no cliente (se anônimo) — o
       // servidor só repassa pros outros participantes, não decide o valor.
       socket.data.avatarId = sanitizeAvatarId(payload.avatarId);
+      // Só quem está logado e enviou uma foto tem isso preenchido; visitante
+      // anônimo cai pro avatarId acima.
+      socket.data.avatarUrl = sanitizeAvatarUrl(payload.avatarUrl);
       socket.data.micEnabled = false;
       socket.data.screenSharing = false;
       socket.data.deafened = false;
@@ -285,16 +292,22 @@ io.on("connection", (socket) => {
       if (accountKey) {
         roomAccountSockets.set(accountKey, socket.id);
       }
-      // Salas particulares guardam o histórico de chat no banco (ver
-      // chat-message abaixo) justamente para poder devolvê-lo aqui e não
-      // perder as mensagens quando alguém recarrega a página.
-      const chatHistory = socket.data.roomIsPrivate
-        ? await prisma.chatMessage.findMany({
-            where: { roomId: persistedRoom.id },
-            orderBy: { createdAt: "asc" },
-            take: 200,
-          })
-        : null;
+      // Não bloqueia o join: só alimenta "Salas Acessadas Anteriormente"
+      // no painel/tela inicial, não é crítico pro caminho de entrar na sala.
+      if (accountUserId) {
+        recordRoomVisit(accountUserId, persistedRoom.id).catch((error) => {
+          console.error("[join-room] falha ao registrar visita", error);
+        });
+      }
+      // Toda sala guarda o histórico de chat no banco (ver chat-message
+      // abaixo), pública/anônima ou não — assim ninguém perde as mensagens
+      // ao recarregar a página. Some sozinho quando a sala é apagada (cascade
+      // no schema), inclusive salas anônimas expiradas em 24h.
+      const chatHistory = await prisma.chatMessage.findMany({
+        where: { roomId: persistedRoom.id },
+        orderBy: { createdAt: "asc" },
+        take: 200,
+      });
 
       callback({
         ok: true,
@@ -315,6 +328,7 @@ io.on("connection", (socket) => {
         id: socket.id,
         name,
         avatarId: socket.data.avatarId,
+        avatarUrl: socket.data.avatarUrl,
         micEnabled: false,
         screenSharing: false,
         deafened: false,
@@ -390,8 +404,8 @@ io.on("connection", (socket) => {
       timestamp: new Date().toISOString(),
     });
 
-    // Só salas particulares guardam histórico (ver join-room acima).
-    if (socket.data.roomIsPrivate && socket.data.roomDbId) {
+    // Toda sala guarda histórico agora (ver join-room acima).
+    if (socket.data.roomDbId) {
       try {
         await prisma.chatMessage.create({
           data: {

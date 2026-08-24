@@ -6,6 +6,7 @@ import prisma from "./db.js";
 import { requireAuth, optionalAuth } from "./auth.js";
 import { sanitizeRoomId, sanitizeRoomName } from "./sanitize.js";
 import { roomPasswordLimiter } from "./rateLimit.js";
+import { getRoomParticipantCount } from "./presence.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -34,6 +35,7 @@ function publicRoom(room) {
     name: room.name,
     isPublic: !room.passwordHash,
     createdAt: room.createdAt,
+    participantCount: getRoomParticipantCount(room.slug),
   };
 }
 
@@ -78,6 +80,24 @@ export async function findLiveRoomBySlug(slug) {
   return room;
 }
 
+// Registra "essa conta entrou nessa sala agora" para alimentar a lista de
+// "Salas Acessadas Anteriormente". Chamado pelo signaling (server.js) a
+// cada join-room de quem está logado — sem bloquear a entrada na sala se
+// isso falhar, por isso nunca lança.
+export async function recordRoomVisit(userId, roomId) {
+  if (!userId || !roomId) return;
+
+  try {
+    await prisma.roomVisit.upsert({
+      where: { userId_roomId: { userId, roomId } },
+      update: { lastVisitedAt: new Date() },
+      create: { userId, roomId },
+    });
+  } catch (error) {
+    console.error("[recordRoomVisit]", error);
+  }
+}
+
 const router = Router();
 
 // --- Painel do dono (autenticado) ---
@@ -89,6 +109,33 @@ router.get("/", requireAuth, async (req, res) => {
   });
 
   res.json({ ok: true, rooms: rooms.map(publicRoom) });
+});
+
+// Salas de outras pessoas que essa conta já entrou (não as que ela mesma
+// criou, essas já aparecem em GET /). Mais recentes primeiro, com a foto de
+// participantes atual embutida em publicRoom() via getRoomParticipantCount.
+router.get("/visited", requireAuth, async (req, res) => {
+  const visits = await prisma.roomVisit.findMany({
+    where: {
+      userId: req.user.id,
+      room: { OR: [{ ownerId: null }, { ownerId: { not: req.user.id } }] },
+    },
+    orderBy: { lastVisitedAt: "desc" },
+    take: 15,
+    include: { room: true },
+  });
+
+  const rooms = [];
+  for (const visit of visits) {
+    if (isExpired(visit.room)) {
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.room.delete({ where: { id: visit.room.id } }).catch(() => {});
+      continue;
+    }
+    rooms.push({ ...publicRoom(visit.room), lastVisitedAt: visit.lastVisitedAt });
+  }
+
+  res.json({ ok: true, rooms });
 });
 
 // Sem login: cria uma sala pública "rápida", sem dono, que não aparece em
@@ -231,6 +278,8 @@ router.get("/:slug/info", async (req, res) => {
     exists: Boolean(room),
     requiresPassword: Boolean(room?.passwordHash),
     name: room?.name || null,
+    participantCount: room ? getRoomParticipantCount(room.slug) : 0,
+    expiresAt: room?.expiresAt || null,
   });
 });
 

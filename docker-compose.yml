@@ -46,6 +46,11 @@ services:
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_URL: ${TURN_URL:-}
 
+      AVATAR_UPLOAD_DIR: /app/uploads/avatars
+
+    volumes:
+      - avatar-uploads:/app/uploads/avatars
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,6 +69,9 @@ services:
 
     container_name: webrtc-frontend
     restart: unless-stopped
+
+    volumes:
+      - avatar-uploads:/usr/share/nginx/uploads/avatars:ro
 
     depends_on:
       - backend
@@ -101,3 +109,4 @@ networks:
 
 volumes:
   postgres-data:
+  avatar-uploads:

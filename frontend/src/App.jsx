@@ -1,20 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Check,
   Clock,
   Copy,
   Globe,
   HeadphoneOff,
   Headphones,
+  LayoutGrid,
   Link2,
   Lock,
   LogOut,
   Maximize,
+  Maximize2,
+  MessageSquare,
+  Settings,
   Mic,
   MicOff,
   Minimize,
   MonitorOff,
   MonitorUp,
+  Play,
   Send,
   User,
   Users,
@@ -51,6 +57,7 @@ import {
 } from "./lib/preferences.js";
 import { isElectronDesktop } from "./lib/electronAppAudio.js";
 import { randomGuestName } from "./lib/catNames.js";
+import { fetchCreatedRooms, fetchVisitedRooms } from "./lib/roomsApi.js";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -90,6 +97,12 @@ function hashToAvatarId(seed) {
   return (hash % AVATAR_COUNT) + 1;
 }
 
+// Foto enviada (só quem tem conta) tem prioridade sobre os gatinhos prontos.
+function resolveAvatarSrc(participant) {
+  if (participant.avatarUrl) return participant.avatarUrl;
+  return catAvatarUrl(participant.avatarId ?? hashToAvatarId(participant.id));
+}
+
 function avatarGradient(seed) {
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
@@ -108,6 +121,22 @@ function formatCallDuration(ms) {
   const pad = (n) => String(n).padStart(2, "0");
 
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+}
+
+// Salas anônimas expiram em 24h (ver ANONYMOUS_ROOM_TTL_MS no backend);
+// salas de conta (expiresAt null) nunca expiram sozinhas.
+function formatExpiresIn(expiresAt) {
+  if (!expiresAt) return "Sem expiração";
+
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return "Expirando...";
+
+  const totalMinutes = Math.round(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours > 0) return `Expira em ${hours}h${minutes > 0 ? ` ${minutes}min` : ""}`;
+  return `Expira em ${minutes}min`;
 }
 
 // As salas são sempre criadas pelo servidor (POST /api/rooms) — não geramos
@@ -146,6 +175,45 @@ function Landing({ onNavigate, currentUser }) {
   const [pastedLink, setPastedLink] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [error, setError] = useState("");
+  const [createdRooms, setCreatedRooms] = useState([]);
+  const [visitedRooms, setVisitedRooms] = useState([]);
+
+  // Só faz sentido pra quem está logado (visitante anônimo não tem sala
+  // "criada por mim" nem histórico entre sessões pra listar aqui).
+  // Recarrega periodicamente pra manter a contagem de participantes atual.
+  useEffect(() => {
+    if (!currentUser) {
+      setCreatedRooms([]);
+      setVisitedRooms([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [created, visited] = await Promise.all([fetchCreatedRooms(), fetchVisitedRooms()]);
+        if (!cancelled) {
+          setCreatedRooms(created);
+          setVisitedRooms(visited);
+        }
+      } catch {
+        // Atalho opcional: se falhar, a tela inicial segue funcionando sem ele.
+      }
+    }
+
+    load();
+    const interval = window.setInterval(load, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentUser]);
+
+  function handleMyRoomSelect(event) {
+    const slug = event.target.value;
+    if (slug) onNavigate(`/r/${slug}`);
+  }
 
   async function createRoom(password) {
     // Sala particular exige login (backend rejeita senha sem token) — usa
@@ -295,6 +363,42 @@ function Landing({ onNavigate, currentUser }) {
           </Button>
         </form>
 
+        {currentUser && (createdRooms.length > 0 || visitedRooms.length > 0) ? (
+          <div className="grid gap-2">
+            <Label htmlFor="my-rooms-select">Minhas salas</Label>
+            <select
+              id="my-rooms-select"
+              value=""
+              onChange={handleMyRoomSelect}
+              className="h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+            >
+              <option value="" disabled>
+                Escolher uma sala...
+              </option>
+              {createdRooms.length > 0 ? (
+                <optgroup label="Salas criadas">
+                  {createdRooms.map((room) => (
+                    <option key={room.id} value={room.slug}>
+                      {room.name || "Sala sem nome"} — {room.participantCount || 0}{" "}
+                      {room.participantCount === 1 ? "participante" : "participantes"}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {visitedRooms.length > 0 ? (
+                <optgroup label="Salas acessadas anteriormente">
+                  {visitedRooms.map((room) => (
+                    <option key={room.id} value={room.slug}>
+                      {room.name || "Sala sem nome"} — {room.participantCount || 0}{" "}
+                      {room.participantCount === 1 ? "participante" : "participantes"}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
+          </div>
+        ) : null}
+
         {!currentUser ? (
           <p className="text-center text-sm text-muted-foreground">
             Já tem conta?{" "}
@@ -367,6 +471,8 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
   const [requiresPassword, setRequiresPassword] = useState(false);
   const [roomNotFound, setRoomNotFound] = useState(false);
   const [roomLabel, setRoomLabel] = useState("");
+  const [participantCount, setParticipantCount] = useState(0);
+  const [expiresAt, setExpiresAt] = useState(null);
   const [checkingRoom, setCheckingRoom] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -376,21 +482,30 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
     setCheckingRoom(true);
     setRoomNotFound(false);
 
-    fetch(`/api/rooms/${roomId}/info`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return;
-        setRoomNotFound(!data?.exists);
-        setRequiresPassword(Boolean(data?.requiresPassword));
-        setRoomLabel(data?.name || "");
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (active) setCheckingRoom(false);
-      });
+    function load() {
+      fetch(`/api/rooms/${roomId}/info`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (!active) return;
+          setRoomNotFound(!data?.exists);
+          setRequiresPassword(Boolean(data?.requiresPassword));
+          setRoomLabel(data?.name || "");
+          setParticipantCount(data?.participantCount || 0);
+          setExpiresAt(data?.expiresAt || null);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (active) setCheckingRoom(false);
+        });
+    }
+
+    load();
+    // Contagem de participantes "ao vivo" enquanto a pessoa decide se entra.
+    const interval = window.setInterval(load, 10000);
 
     return () => {
       active = false;
+      window.clearInterval(interval);
     };
   }, [roomId]);
 
@@ -474,17 +589,29 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
           </div>
 
           {!checkingRoom ? (
-            <Badge
-              variant="outline"
-              className={
-                requiresPassword
-                  ? "gap-1.5 self-start border-primary/25 bg-primary/10 text-primary"
-                  : "gap-1.5 self-start border-success/25 bg-success/10 text-success"
-              }
-            >
-              {requiresPassword ? <Lock size={12} /> : <Globe size={12} />}
-              {requiresPassword ? "Sala privada" : "Sala pública"}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className={
+                  requiresPassword
+                    ? "gap-1.5 border-primary/25 bg-primary/10 text-primary"
+                    : "gap-1.5 border-success/25 bg-success/10 text-success"
+                }
+              >
+                {requiresPassword ? <Lock size={12} /> : <Globe size={12} />}
+                {requiresPassword ? "Sala privada" : "Sala pública"}
+              </Badge>
+
+              <Badge variant="outline" className="gap-1.5 border-white/10 text-muted-foreground">
+                <Users size={12} />
+                {participantCount === 1 ? "1 participante" : `${participantCount} participantes`}
+              </Badge>
+
+              <Badge variant="outline" className="gap-1.5 border-white/10 text-muted-foreground">
+                <Clock size={12} />
+                {formatExpiresIn(expiresAt)}
+              </Badge>
+            </div>
           ) : null}
 
           <div className="grid gap-2">
@@ -556,16 +683,51 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
               </>
             )}
           </p>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl text-sm"
+            onClick={() => onNavigate("/")}
+          >
+            <ArrowLeft size={16} />
+            Voltar
+          </Button>
         </form>
       </Card>
     </AuthLayout>
   );
 }
 
-function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }) {
+// Transmissão de outra pessoa começa borrada — só quem está vendo decide
+// quando quer parar o que está fazendo pra prestar atenção (a própria
+// transmissão de quem compartilha nunca passa por isso, é só pra quem
+// assiste). Ver revealedShares/revealShare em Room.
+function ShareCard({ share, muted, volume, revealed, onReveal }) {
+  const gated = !share.local && !revealed;
+
+  return (
+    <article className={`share-card${gated ? " gated" : ""}`}>
+      <StreamVideo stream={share.stream} muted={muted} volume={volume} />
+      {gated ? (
+        <div className="share-gate">
+          <button type="button" className="share-gate-button" onClick={onReveal}>
+            <Play size={20} />
+            Começar a assistir
+          </button>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, onNavigate, onRoomInfo }) {
   const [message, setMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Chat some por padrão pra dar mais espaço pro palco; quem quiser abre
+  // pelo botão na topbar.
+  const [chatOpen, setChatOpen] = useState(false);
   // "Ensurdecer": silencia todo mundo de uma vez (mic dos outros + áudio da
   // transmissão), sem sair da sala e sem mexer nos volumes individuais —
   // eles voltam do jeito que estavam ao desativar.
@@ -573,6 +735,9 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [roomInfo, setRoomInfo] = useState(null);
   const [focusedShareId, setFocusedShareId] = useState(null);
+  // "focus" = uma tela grande por vez (como já era); "grid" = todas lado a
+  // lado, 2 por linha. Só faz diferença quando tem mais de 1 transmissão.
+  const [stageViewMode, setStageViewMode] = useState("focus");
   const [screenShareVolume, setScreenShareVolume] = useState(getPreferredScreenShareVolume);
 
   function changeScreenShareVolume(volume) {
@@ -592,13 +757,17 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     fetch(`/api/rooms/${roomId}/info`)
       .then((response) => response.json())
       .then((data) => {
-        if (active) setRoomInfo(data);
+        if (active) {
+          setRoomInfo(data);
+          onRoomInfo?.(data);
+        }
       })
       .catch(() => {});
 
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
   useEffect(() => {
@@ -636,6 +805,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
 
   const {
     connected,
+    joined,
     supersededByTab,
     pingMs,
     transport,
@@ -658,7 +828,13 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     toggleScreenShare,
     sendMessage,
     broadcastDeafened,
-  } = useRoomWebRTC({ roomId, name, roomToken, avatarId: myAvatarId });
+  } = useRoomWebRTC({
+    roomId,
+    name,
+    roomToken,
+    avatarId: myAvatarId,
+    avatarUrl: currentUser?.avatarUrl || undefined,
+  });
 
   // O roomToken guardado (ou o cadastro pra reentrada automática após um F5)
   // não vale mais para uma sala particular: volta pra tela de senha.
@@ -666,18 +842,52 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
     if (requiresPassword) onNeedsPassword();
   }, [requiresPassword, onNeedsPassword]);
 
+  // Contador de mensagens não lidas no botão "Chat", pra quem está com o
+  // chat fechado perceber que chegou algo novo. seenMessageCountRef marca
+  // até onde a pessoa já "viu": zera no primeiro "joined" (nesse ponto o
+  // histórico da sala, se teve, já chegou junto — "connected" vira true
+  // bem antes disso, só o transporte do socket.io, não dá pra usar aqui)
+  // e sobe de novo toda vez que o chat é aberto.
+  const [unreadCount, setUnreadCount] = useState(0);
+  const seenMessageCountRef = useRef(0);
+  const wasJoinedRef = useRef(false);
+
+  useEffect(() => {
+    if (joined && !wasJoinedRef.current) {
+      wasJoinedRef.current = true;
+      seenMessageCountRef.current = messages.length;
+      return;
+    }
+
+    if (!joined) {
+      wasJoinedRef.current = false;
+      return;
+    }
+
+    if (chatOpen) {
+      seenMessageCountRef.current = messages.length;
+      setUnreadCount(0);
+      return;
+    }
+
+    if (messages.length > seenMessageCountRef.current) {
+      setUnreadCount(messages.length - seenMessageCountRef.current);
+    }
+  }, [joined, messages.length, chatOpen]);
+
   const allParticipants = useMemo(
     () => [
       {
         id: "self",
         name,
         avatarId: myAvatarId,
+        avatarUrl: currentUser?.avatarUrl || null,
         micEnabled,
         screenSharing,
       },
       ...participants,
     ],
-    [micEnabled, myAvatarId, name, participants, screenSharing]
+    [currentUser?.avatarUrl, micEnabled, myAvatarId, name, participants, screenSharing]
   );
 
   // Tempo total que a sala teve mais de uma pessoa junto (não reseta se
@@ -749,6 +959,44 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
       document.exitFullscreen().catch(() => {});
     }
   }, [activeShares.length]);
+
+  // Transmissões de outras pessoas começam borradas (ver ShareCard); quem
+  // assiste clica em "Começar a assistir" pra revelar. Guardado por id de
+  // participante, não por sala inteira: cada transmissão alheia pede o
+  // próprio clique.
+  const [revealedShares, setRevealedShares] = useState(() => new Set());
+
+  function revealShare(shareId) {
+    setRevealedShares((current) => {
+      if (current.has(shareId)) return current;
+      const next = new Set(current);
+      next.add(shareId);
+      return next;
+    });
+  }
+
+  // Se a pessoa parar de compartilhar, tira ela da lista de "liberado" —
+  // assim, se compartilhar de novo depois (mesmo participant.id), conta
+  // como uma transmissão nova e volta a pedir o clique.
+  const remoteSharingIdsKey = remoteSharers
+    .map((participant) => participant.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    const stillSharing = new Set(remoteSharingIdsKey ? remoteSharingIdsKey.split(",") : []);
+    setRevealedShares((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const id of next) {
+        if (!stillSharing.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [remoteSharingIdsKey]);
 
   const connectionHealth = !connected
     ? { label: "Sem conexão", tone: "bad" }
@@ -875,16 +1123,39 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
             </button>
           ) : null}
 
+          <button
+            className={`ghost-button${chatOpen ? " active" : ""}`}
+            onClick={() => setChatOpen((current) => !current)}
+            title={chatOpen ? "Ocultar chat" : "Mostrar chat"}
+          >
+            <MessageSquare size={17} />
+            {chatOpen ? "Ocultar chat" : "Chat"}
+            {!chatOpen && unreadCount > 0 ? (
+              <span className="chat-unread-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+            ) : null}
+          </button>
+
           <button className="ghost-button" onClick={copyRoom}>
             {copied ? <Check size={17} /> : <Copy size={17} />}
             {copied ? "Copiado" : "Copiar link"}
           </button>
+
+          {currentUser ? (
+            <button
+              className="ghost-button"
+              onClick={() => onNavigate?.("/conta")}
+              title="Configurações da conta"
+            >
+              <Settings size={17} />
+              Configurações
+            </button>
+          ) : null}
         </div>
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <section className="workspace">
+      <section className={`workspace${chatOpen ? "" : " chat-collapsed"}`}>
         <aside className="participants-panel">
           <div className="panel-title">
             <Users size={16} />
@@ -909,8 +1180,8 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                       style={{ background: avatarGradient(participant.id) }}
                     >
                       <img
-                        className="avatar-img"
-                        src={catAvatarUrl(participant.avatarId ?? hashToAvatarId(participant.id))}
+                        className={`avatar-img${participant.avatarUrl ? " photo" : ""}`}
+                        src={resolveAvatarSrc(participant)}
                         alt=""
                       />
                     </div>
@@ -923,13 +1194,13 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                       {participant.screenSharing ? (
                         <span className="participant-sharing">
                           <span className="live-dot" />
-                          Compartilhando tela
+                          AO VIVO
                         </span>
                       ) : null}
                     </div>
                     <div className="participant-icons">
                       {participant.screenSharing ? (
-                        <MonitorUp size={15} title="Compartilhando tela" />
+                        <MonitorUp size={15} className="sharing-icon" title="Compartilhando tela" />
                       ) : null}
                       {participant.micEnabled ? <Mic size={15} /> : <MicOff size={15} />}
                       {(isSelf ? deafened : participant.deafened) ? (
@@ -1006,18 +1277,43 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                 <div className="stage-selector">
                   {activeShares.length > 1 ? (
                     <>
-                      <MonitorUp size={14} />
-                      <select
-                        value={focusedShare?.id ?? ""}
-                        onChange={(event) => setFocusedShareId(event.target.value)}
-                        title="Escolher tela"
-                      >
-                        {activeShares.map((share) => (
-                          <option key={share.id} value={share.id}>
-                            {share.name}
-                          </option>
-                        ))}
-                      </select>
+                      {stageViewMode === "focus" ? (
+                        <>
+                          <MonitorUp size={14} />
+                          <select
+                            value={focusedShare?.id ?? ""}
+                            onChange={(event) => setFocusedShareId(event.target.value)}
+                            title="Escolher tela"
+                          >
+                            {activeShares.map((share) => (
+                              <option key={share.id} value={share.id}>
+                                {share.name}
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      ) : null}
+
+                      <div className="view-mode-toggle">
+                        <button
+                          type="button"
+                          className={stageViewMode === "focus" ? "active" : ""}
+                          onClick={() => setStageViewMode("focus")}
+                          title="Uma tela por vez"
+                        >
+                          <Maximize2 size={13} />
+                          Foco
+                        </button>
+                        <button
+                          type="button"
+                          className={stageViewMode === "grid" ? "active" : ""}
+                          onClick={() => setStageViewMode("grid")}
+                          title="Todas as telas lado a lado"
+                        >
+                          <LayoutGrid size={13} />
+                          Lado a lado
+                        </button>
+                      </div>
                     </>
                   ) : null}
 
@@ -1043,17 +1339,33 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                   </div>
                 </div>
 
-                <div className="share-grid shares-1">
-                  {focusedShare ? (
-                    <article className="share-card" key={focusedShare.id}>
-                      <StreamVideo
-                        stream={focusedShare.stream}
+                {stageViewMode === "grid" && activeShares.length > 1 ? (
+                  <div className={`share-grid shares-${Math.min(activeShares.length, 4)}`}>
+                    {activeShares.map((share) => (
+                      <ShareCard
+                        key={share.id}
+                        share={share}
+                        muted={share.local}
+                        volume={deafened ? 0 : screenShareVolume}
+                        revealed={revealedShares.has(share.id)}
+                        onReveal={() => revealShare(share.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="share-grid shares-1">
+                    {focusedShare ? (
+                      <ShareCard
+                        key={focusedShare.id}
+                        share={focusedShare}
                         muted={focusedShare.local}
                         volume={deafened ? 0 : screenShareVolume}
+                        revealed={revealedShares.has(focusedShare.id)}
+                        onReveal={() => revealShare(focusedShare.id)}
                       />
-                    </article>
-                  ) : null}
-                </div>
+                    ) : null}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1137,47 +1449,49 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
           </footer>
         </section>
 
-        <aside className="chat-panel">
-          <div className="chat-header">
-            <strong>Chat da sala</strong>
-            <span>{messages.length} mensagens</span>
-          </div>
+        {chatOpen ? (
+          <aside className="chat-panel">
+            <div className="chat-header">
+              <strong>Chat da sala</strong>
+              <span>{messages.length} mensagens</span>
+            </div>
 
-          <div className="messages">
-            {messages.length === 0 ? (
-              <div className="chat-empty">As mensagens desta sala aparecerão aqui.</div>
-            ) : (
-              messages.map((item) => (
-                <article className="message" key={item.id}>
-                  <div>
-                    <strong>{item.user}</strong>
-                    <time>
-                      {new Date(item.timestamp).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </time>
-                  </div>
-                  <p>{item.message}</p>
-                </article>
-              ))
-            )}
-          </div>
+            <div className="messages">
+              {messages.length === 0 ? (
+                <div className="chat-empty">As mensagens desta sala aparecerão aqui.</div>
+              ) : (
+                messages.map((item) => (
+                  <article className="message" key={item.id}>
+                    <div>
+                      <strong>{item.user}</strong>
+                      <time>
+                        {new Date(item.timestamp).toLocaleTimeString("pt-BR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                    </div>
+                    <p>{item.message}</p>
+                  </article>
+                ))
+              )}
+            </div>
 
-          <div className="chat-input-area">
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={handleMessageKeyDown}
-              placeholder="Digite uma mensagem..."
-              rows={1}
-              maxLength={2000}
-            />
-            <button onClick={handleSend} title="Enviar mensagem">
-              <Send size={18} />
-            </button>
-          </div>
-        </aside>
+            <div className="chat-input-area">
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={handleMessageKeyDown}
+                placeholder="Digite uma mensagem..."
+                rows={1}
+                maxLength={2000}
+              />
+              <button onClick={handleSend} title="Enviar mensagem">
+                <Send size={18} />
+              </button>
+            </div>
+          </aside>
+        ) : null}
       </section>
     </main>
   );
@@ -1203,6 +1517,11 @@ export default function App() {
     return stored ? { name: stored.name, roomToken: stored.roomToken } : { name: null, roomToken: null };
   });
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
+  // Sala que continua conectada "em segundo plano" quando o usuário abre
+  // Configurações (/conta) sem sair da chamada de propósito. Só existe
+  // enquanto a pessoa está de fato numa sala; qualquer navegação que não
+  // seja pra /conta solta essa referência (ver efeito abaixo).
+  const [pinnedRoom, setPinnedRoom] = useState(null);
 
   useEffect(() => {
     function handlePopState() {
@@ -1238,11 +1557,6 @@ export default function App() {
     if (roomId) saveRoomSession(roomId, name, roomToken || null);
   }
 
-  function handleNeedsPassword() {
-    if (roomId) clearRoomSession(roomId);
-    setSession({ name: null, roomToken: null });
-  }
-
   useEffect(() => {
     if ((pathname === "/painel" || pathname === "/conta") && !currentUser) {
       navigate("/entrar");
@@ -1259,6 +1573,27 @@ export default function App() {
     () => (isSpecialRoute ? null : getRoomIdFromPath(pathname)),
     [isSpecialRoute, pathname]
   );
+
+  // Mantém pinnedRoom em dia enquanto o usuário está mesmo numa sala.
+  // Só NÃO solta a referência ao navegar pra /conta — qualquer outro
+  // destino (Início, outra sala, etc.) conta como "saiu de vez".
+  useEffect(() => {
+    if (roomId && session.name) {
+      setPinnedRoom((current) =>
+        current && current.roomId === roomId
+          ? { ...current, name: session.name, roomToken: session.roomToken }
+          : { roomId, name: session.name, roomToken: session.roomToken, displayName: null }
+      );
+    } else if (pathname !== "/conta") {
+      setPinnedRoom(null);
+    }
+  }, [roomId, session.name, session.roomToken, pathname]);
+
+  function handleRoomInfo(forRoomId, data) {
+    setPinnedRoom((current) =>
+      current && current.roomId === forRoomId ? { ...current, displayName: data?.name || null } : current
+    );
+  }
 
   if (pathname === "/termos") {
     return <TermsOfUse onNavigate={navigate} />;
@@ -1288,16 +1623,41 @@ export default function App() {
     );
   }
 
+  // A sala pra renderizar agora: a da própria URL (caminho normal) ou,
+  // só enquanto pathname === "/conta", a sala pinada (ver efeito acima).
+  // Fora do "/conta" isso NUNCA cai pro pinnedRoom — assim navegar pra
+  // qualquer lugar que não seja Configurações continua largando a sala
+  // de verdade, como antes.
+  const roomForRender =
+    roomId && session.name
+      ? { roomId, name: session.name, roomToken: session.roomToken }
+      : pathname === "/conta"
+        ? pinnedRoom
+        : null;
+
   if (pathname === "/conta") {
     if (!currentUser) return null;
-    return <Account user={currentUser} onNavigate={navigate} onUserUpdated={setCurrentUser} />;
-  }
 
-  if (!roomId) {
-    return <Landing onNavigate={navigate} currentUser={currentUser} />;
-  }
+    if (!roomForRender) {
+      return (
+        <Account
+          user={currentUser}
+          onNavigate={navigate}
+          onUserUpdated={setCurrentUser}
+          pinnedRoom={null}
+          onReturnToRoom={() => {}}
+        />
+      );
+    }
+    // Sala pinada existe: cai pro bloco unificado abaixo, que também
+    // desenha o Account por cima. Ver comentário ali sobre por que isso
+    // precisa ser o MESMO ponto da árvore usado pela sala "normal" (fora
+    // do /conta) — é isso que evita reconectar ao entrar/sair daqui.
+  } else if (!roomForRender) {
+    if (!roomId) {
+      return <Landing onNavigate={navigate} currentUser={currentUser} />;
+    }
 
-  if (!session.name) {
     return (
       <JoinRoom
         roomId={roomId}
@@ -1308,17 +1668,45 @@ export default function App() {
     );
   }
 
+  // Ponto único de montagem do <Room>: tanto a visita normal (pathname na
+  // própria URL da sala) quanto o desvio por /conta passam por AQUI, com a
+  // MESMA posição/forma de árvore (Fragment > [Account-ou-null, div>Room]).
+  // Só assim o React reaproveita a mesma instância do Room (e o socket.io
+  // por trás dela) ao entrar/sair de Configurações — se cada caso tivesse
+  // seu próprio "return <Room/>" separado, o React trataria como
+  // desmontar uma e montar outra, derrubando e reconectando a chamada a
+  // cada ida e volta.
   return (
-    <Room
-      roomId={roomId}
-      name={session.name}
-      roomToken={session.roomToken}
-      currentUser={currentUser}
-      onLeave={() => {
-        clearRoomSession(roomId);
-        window.location.reload();
-      }}
-      onNeedsPassword={handleNeedsPassword}
-    />
+    <>
+      {pathname === "/conta" ? (
+        <Account
+          user={currentUser}
+          onNavigate={navigate}
+          onUserUpdated={setCurrentUser}
+          pinnedRoom={pinnedRoom}
+          onReturnToRoom={() => navigate(`/r/${roomForRender.roomId}`)}
+        />
+      ) : null}
+      <div className={pathname === "/conta" ? "hidden" : undefined}>
+        <Room
+          roomId={roomForRender.roomId}
+          name={roomForRender.name}
+          roomToken={roomForRender.roomToken}
+          currentUser={currentUser}
+          onNavigate={navigate}
+          onRoomInfo={(data) => handleRoomInfo(roomForRender.roomId, data)}
+          onLeave={() => {
+            clearRoomSession(roomForRender.roomId);
+            setPinnedRoom(null);
+            window.location.reload();
+          }}
+          onNeedsPassword={() => {
+            clearRoomSession(roomForRender.roomId);
+            setSession({ name: null, roomToken: null });
+            setPinnedRoom(null);
+          }}
+        />
+      </div>
+    </>
   );
 }

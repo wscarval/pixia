@@ -68,7 +68,7 @@ async function getConnectionRtt(pc) {
   return null;
 }
 
-export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
+export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avatarUrl }) {
   const socketRef = useRef(null);
   const selfIdRef = useRef(null);
   // Identifica essa aba (não essa pessoa) de forma estável entre
@@ -100,6 +100,11 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const localSpeakingStreamRef = useRef(null);
 
   const [connected, setConnected] = useState(false);
+  // Diferente de "connected": esse só vira true depois que o servidor
+  // confirma o join-room (participantes e histórico de chat, se teve, já
+  // chegaram nessa mesma resposta) — "connected" já é true bem antes disso,
+  // assim que o transporte do socket.io conecta.
+  const [joined, setJoined] = useState(false);
   // Igual a outra aba desse MESMO navegador (não da mesma rede, não da
   // mesma conta) abriu essa sala e assumiu a presença. Ver o useEffect do
   // BroadcastChannel mais abaixo.
@@ -661,6 +666,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
           name,
           roomToken,
           avatarId,
+          avatarUrl,
           clientId: clientIdRef.current,
           // Se logado, prova a identidade da conta pro servidor poder
           // derrubar uma aba antiga da MESMA conta nessa sala (ver
@@ -678,6 +684,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
           }
 
           setRequiresPassword(false);
+          setJoined(true);
           selfIdRef.current = response.selfId;
           const existing = response.participants || [];
           setParticipants(existing);
@@ -710,6 +717,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       if (!active) return;
 
       setConnected(false);
+      setJoined(false);
       setPingMs(null);
       setTransport(null);
       setParticipants([]);
@@ -804,6 +812,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
     };
   }, [
     avatarId,
+    avatarUrl,
     createPeer,
     handleSignal,
     name,
@@ -1161,6 +1170,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
 
   return {
     connected,
+    joined,
     supersededByTab,
     pingMs,
     participants,

@@ -43,6 +43,11 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  /* Sem isso, o popup nativo de <option> do navegador (que CSS de tema não
+     alcança) renderiza com fundo claro do SO por padrão — com o <select>
+     em si já estilizado escuro, o texto herdado fica claro sobre claro,
+     ilegível. Isso avisa o navegador pra usar as cores certas nesse popup. */
+  color-scheme: dark;
 
   --background: #0b0c10;
   --foreground: #f2f3f5;
@@ -707,6 +712,30 @@ button {
   background: #202026;
 }
 
+.ghost-button.active {
+  background: var(--legacy-accent-soft);
+  color: #c4b5fd;
+}
+
+.ghost-button.active:hover {
+  background: rgba(108, 94, 219, 0.22);
+}
+
+.chat-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .error-banner {
   padding: 9px 18px;
   border-bottom: 1px solid rgba(239, 68, 68, 0.22);
@@ -721,6 +750,12 @@ button {
   flex: 1;
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr) 320px;
+}
+
+/* Chat some por padrão (ver botão "Chat" na topbar) — sem essa 3ª coluna,
+   o palco ganha esse espaço de volta em vez de sobrar vazio. */
+.workspace.chat-collapsed {
+  grid-template-columns: 230px minmax(0, 1fr);
 }
 
 .participants-panel,
@@ -887,6 +922,15 @@ button {
   object-fit: contain;
 }
 
+/* Foto enviada de verdade (não os gatinhos, que são ícone com fundo
+   transparente) precisa preencher o círculo inteiro, senão sobra fundo
+   escuro nas bordas e a foto fica pequena/quadrada no meio do avatar. */
+.avatar-img.photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .participant-copy {
   min-width: 0;
   flex: 1;
@@ -912,11 +956,24 @@ button {
   font-size: 10px;
 }
 
+/* Selo compacto tipo "AO VIVO" — precisa ser inline-flex + align-self, senão
+   o pai (.participant-copy, flex-column) estica ele pra largura cheia da
+   coluna e, sem max-content, o texto acaba vazando/quebrando estranho numa
+   sidebar de 230px. */
 .participant-copy span.participant-sharing {
-  display: flex;
+  display: inline-flex;
+  align-self: flex-start;
   align-items: center;
   gap: 5px;
+  margin-top: 3px;
+  padding: 2px 7px 2px 6px;
+  border-radius: 999px;
+  background: rgba(252, 165, 165, 0.12);
   color: #fca5a5;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 .participant-icons {
@@ -927,6 +984,10 @@ button {
 
 .deafened-icon {
   color: var(--destructive);
+}
+
+.sharing-icon {
+  color: #c4b5fd;
 }
 
 .stage-column {
@@ -965,6 +1026,48 @@ button {
   border-radius: 9px;
   outline: none;
   background: #0d0d10;
+  color: #fafafa;
+}
+
+/* color-scheme: dark (ver :root) já cobre a maioria dos navegadores, mas
+   fixar aqui também garante o mesmo visual do resto da plataforma em vez do
+   cinza genérico de "modo escuro" do navegador. */
+select option,
+select optgroup {
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.view-mode-toggle {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: #0d0d10;
+}
+
+.view-mode-toggle button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #71717a;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.view-mode-toggle button:hover {
+  color: #d4d4d8;
+}
+
+.view-mode-toggle button.active {
+  background: #232428;
   color: #fafafa;
 }
 
@@ -1083,9 +1186,48 @@ button {
   background: black;
 }
 
+.share-card.gated .screen-video {
+  filter: blur(32px);
+  /* Levemente maior que o card: sem isso, o overflow:hidden do card corta
+     o blur de um jeito que deixa uma borda nítida do vídeo visível na
+     ponta, quebrando o efeito. */
+  transform: scale(1.08);
+}
+
+.share-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 9, 11, 0.32);
+}
+
+.share-gate-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(20, 20, 24, 0.78);
+  backdrop-filter: blur(8px);
+  color: #fafafa;
+  font-size: 14.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.share-gate-button:hover {
+  background: var(--legacy-accent);
+  border-color: transparent;
+}
+
 .live-dot {
-  width: 7px;
-  height: 7px;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #ef4444;
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
@@ -1594,6 +1736,10 @@ button {
 @media (max-width: 1050px) {
   .workspace {
     grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .workspace.chat-collapsed {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .participants-panel {

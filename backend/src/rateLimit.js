@@ -22,3 +22,14 @@ export const roomPasswordLimiter = rateLimit({
   legacyHeaders: false,
   message: { ok: false, message: "Muitas tentativas. Espere um pouco e tente de novo." },
 });
+
+// Upload de foto de perfil: cada tentativa manda até 5MB + processa a
+// imagem no servidor (sharp), então o limite é bem mais apertado que os de
+// cima — não é sobre senha errada, é sobre custo de CPU/disco por chamada.
+export const avatarUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Muitas tentativas. Espere um pouco e tente de novo." },
+});

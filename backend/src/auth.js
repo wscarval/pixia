@@ -1,10 +1,14 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import multer from "multer";
+import sharp from "sharp";
 import prisma from "./db.js";
 import { sanitizeAvatarId } from "./sanitize.js";
-import { authLimiter } from "./rateLimit.js";
+import { authLimiter, avatarUploadLimiter } from "./rateLimit.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -23,11 +27,34 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_NAME_LENGTH = 4;
 const MIN_PASSWORD_LENGTH = 6;
 // Fotos de perfil fixas: 4 gatinhos em /public/profiles_cats, escolhidos por
-// índice (1 a 4). Sem upload, é só um seletor.
+// índice (1 a 4) — o padrão pra quem não envia a própria foto (só contas
+// criadas podem fazer isso, visitante anônimo não tem onde guardar).
 const AVATAR_COUNT = 4;
 
 function randomAvatarId() {
   return Math.floor(Math.random() * AVATAR_COUNT) + 1;
+}
+
+// Nome de arquivo é sempre "<id da conta>.webp" — determinístico, então um
+// novo envio simplesmente sobrescreve o anterior (sem lixo acumulando) e o
+// id vem de req.user.id (do token, nunca do que o cliente manda), então não
+// tem como escapar desse diretório escolhendo um nome malicioso.
+const AVATAR_DIR = process.env.AVATAR_UPLOAD_DIR || path.join(process.cwd(), "uploads", "avatars");
+await fs.mkdir(AVATAR_DIR, { recursive: true });
+
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const AVATAR_MIME_ALLOWLIST = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_BYTES, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, AVATAR_MIME_ALLOWLIST.has(file.mimetype));
+  },
+});
+
+function avatarFilePath(userId) {
+  return path.join(AVATAR_DIR, `${userId}.webp`);
 }
 
 function sanitizeName(value) {
@@ -51,7 +78,13 @@ function issueToken(user) {
 }
 
 function publicUser(user) {
-  return { id: user.id, name: user.name, email: user.email, avatarId: user.avatarId };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarId: user.avatarId,
+    avatarUrl: user.avatarUrl || null,
+  };
 }
 
 export async function requireAuth(req, res, next) {
@@ -208,9 +241,86 @@ router.put("/avatar", requireAuth, async (req, res) => {
     return;
   }
 
+  // Escolher um avatar pronto desativa a foto enviada (se tiver uma) — os
+  // dois não fazem sentido ativos ao mesmo tempo.
+  await fs.unlink(avatarFilePath(req.user.id)).catch(() => {});
+
   const updated = await prisma.user.update({
     where: { id: req.user.id },
-    data: { avatarId },
+    data: { avatarId, avatarUrl: null },
+  });
+
+  res.json({ ok: true, user: publicUser(updated) });
+});
+
+router.put(
+  "/avatar-photo",
+  requireAuth,
+  avatarUploadLimiter,
+  (req, res, next) => {
+    avatarUpload.single("photo")(req, res, (error) => {
+      if (error instanceof multer.MulterError) {
+        const message =
+          error.code === "LIMIT_FILE_SIZE"
+            ? "A imagem precisa ter até 5MB."
+            : "Não foi possível processar o arquivo enviado.";
+        res.status(400).json({ ok: false, message });
+        return;
+      }
+      if (error) {
+        next(error);
+        return;
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ ok: false, message: "Envie uma imagem em JPEG, PNG ou WebP de até 5MB." });
+      return;
+    }
+
+    let resized;
+    try {
+      resized = await sharp(req.file.buffer)
+        // Aplica a rotação do EXIF (fotos de celular vêm "deitadas" sem
+        // isso) antes de descartar o resto dos metadados — o .webp() abaixo
+        // não copia EXIF pro arquivo final, então localização/dispositivo
+        // etc. de quem tirou a foto não vazam pra sala.
+        .rotate()
+        .resize(256, 256, { fit: "cover", position: "attention" })
+        .webp({ quality: 82 })
+        .toBuffer();
+    } catch {
+      res.status(400).json({
+        ok: false,
+        message: "Não foi possível ler essa imagem. Tente outro arquivo.",
+      });
+      return;
+    }
+
+    await fs.writeFile(avatarFilePath(req.user.id), resized);
+
+    // Cache-busting: o nome do arquivo é sempre o mesmo (pra sobrescrever o
+    // antigo), então sem isso o navegador continuaria mostrando a foto
+    // velha depois de trocar.
+    const avatarUrl = `/uploads/avatars/${req.user.id}.webp?v=${Date.now()}`;
+
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { avatarUrl },
+    });
+
+    res.json({ ok: true, user: publicUser(updated) });
+  }
+);
+
+router.delete("/avatar-photo", requireAuth, async (req, res) => {
+  await fs.unlink(avatarFilePath(req.user.id)).catch(() => {});
+
+  const updated = await prisma.user.update({
+    where: { id: req.user.id },
+    data: { avatarUrl: null },
   });
 
   res.json({ ok: true, user: publicUser(updated) });

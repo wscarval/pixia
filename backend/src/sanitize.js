@@ -48,3 +48,12 @@ export function sanitizeAvatarId(value) {
   const id = Number(value);
   return Number.isInteger(id) && id >= 1 && id <= 4 ? id : null;
 }
+
+// Foto de perfil enviada (só quem tem conta, ver /api/auth/avatar-photo).
+// Precisa começar com o caminho servido pelo Nginx pra esse propósito —
+// sem essa checagem, alguém poderia mandar uma URL externa qualquer nesse
+// campo (rastreamento, imagem imprópria vinda de outra origem etc.).
+export function sanitizeAvatarUrl(value) {
+  const url = String(value || "").trim();
+  return url.startsWith("/uploads/avatars/") && url.length <= 200 ? url : null;
+}

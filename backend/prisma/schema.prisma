@@ -13,8 +13,10 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   avatarId     Int      @default(1) @map("avatar_id")
+  avatarUrl    String?  @map("avatar_url")
   createdAt    DateTime @default(now()) @map("created_at")
   rooms        Room[]
+  roomVisits   RoomVisit[]
 
   @@map("users")
 }
@@ -30,9 +32,27 @@ model Room {
   expiresAt    DateTime? @map("expires_at")
   creatorIp    String?  @map("creator_ip")
   chatMessages ChatMessage[]
+  visits       RoomVisit[]
 
   @@index([creatorIp])
   @@map("rooms")
+}
+
+// Histórico de "essa conta já entrou nessa sala" — só para quem está
+// logado (visitante anônimo não tem onde guardar isso entre sessões).
+// Usado pra listar "Salas Acessadas Anteriormente" na tela inicial e no
+// painel, separado das salas que a própria conta criou.
+model RoomVisit {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId        String   @map("room_id")
+  room          Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  lastVisitedAt DateTime @default(now()) @map("last_visited_at")
+
+  @@unique([userId, roomId])
+  @@index([userId, lastVisitedAt])
+  @@map("room_visits")
 }
 
 // Histórico de chat, salvo só para salas particulares (têm senha e dono
