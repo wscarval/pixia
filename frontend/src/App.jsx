@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Ban,
   Check,
   Clock,
   Copy,
+  Crown,
   Globe,
   HeadphoneOff,
   Headphones,
   LayoutGrid,
   Link2,
+  Loader2,
   Lock,
   LogOut,
   Maximize,
@@ -24,6 +27,7 @@ import {
   Send,
   User,
   Users,
+  UserX,
   Volume2,
   VolumeX,
   Wifi,
@@ -65,6 +69,14 @@ import { IconInput } from "@/components/ui/icon-input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const AVATAR_PALETTE = [
   ["#8b5cf6", "#6d28d9"],
@@ -75,7 +87,6 @@ const AVATAR_PALETTE = [
   ["#60a5fa", "#1d4ed8"],
 ];
 
-const isFirefox = typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
 const MIN_ROOM_PASSWORD_LENGTH = 6;
 // Fotos de perfil fixas: 4 gatinhos em /public/profiles_cats (sem upload).
 // Quem tem conta escolhe o seu; visitantes sem conta recebem um sorteado
@@ -137,6 +148,13 @@ function formatExpiresIn(expiresAt) {
 
   if (hours > 0) return `Expira em ${hours}h${minutes > 0 ? ` ${minutes}min` : ""}`;
   return `Expira em ${minutes}min`;
+}
+
+function formatMessageTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  const day = date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${day} ${time}`;
 }
 
 // As salas são sempre criadas pelo servidor (POST /api/rooms) — não geramos
@@ -728,6 +746,10 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
   // Chat some por padrão pra dar mais espaço pro palco; quem quiser abre
   // pelo botão na topbar.
   const [chatOpen, setChatOpen] = useState(false);
+  // Participante que o dono da sala clicou pra abrir o modal de
+  // expulsar/banir. { id, name } | null — só existe enquanto o modal está
+  // aberto, não precisa sobreviver a re-renders depois disso.
+  const [moderationTarget, setModerationTarget] = useState(null);
   // "Ensurdecer": silencia todo mundo de uma vez (mic dos outros + áudio da
   // transmissão), sem sair da sala e sem mexer nos volumes individuais —
   // eles voltam do jeito que estavam ao desativar.
@@ -807,6 +829,9 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
     connected,
     joined,
     supersededByTab,
+    banned,
+    isOwner,
+    moderationAction,
     pingMs,
     transport,
     participants,
@@ -827,6 +852,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
     changeScreenQuality,
     toggleScreenShare,
     sendMessage,
+    moderateParticipant,
     broadcastDeafened,
   } = useRoomWebRTC({
     roomId,
@@ -841,6 +867,17 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
   useEffect(() => {
     if (requiresPassword) onNeedsPassword();
   }, [requiresPassword, onNeedsPassword]);
+
+  // Só true ANTES do primeiro "joined" bem-sucedido — depois disso fica
+  // travado em true pro resto da sessão. Existe pra mostrar a tela de
+  // carregamento (ver showInitialLoading mais abaixo) só na entrada, nunca
+  // de novo numa reconexão no meio da chamada (aí o pequeno indicador
+  // "Reconectando" no topo já basta, trocar a tela inteira seria pior).
+  const hasJoinedOnceRef = useRef(false);
+  useEffect(() => {
+    if (joined) hasJoinedOnceRef.current = true;
+  }, [joined]);
+  const showInitialLoading = !joined && !hasJoinedOnceRef.current;
 
   // Contador de mensagens não lidas no botão "Chat", pra quem está com o
   // chat fechado perceber que chegou algo novo. seenMessageCountRef marca
@@ -884,10 +921,11 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
         avatarUrl: currentUser?.avatarUrl || null,
         micEnabled,
         screenSharing,
+        isOwner,
       },
       ...participants,
     ],
-    [currentUser?.avatarUrl, micEnabled, myAvatarId, name, participants, screenSharing]
+    [currentUser?.avatarUrl, isOwner, micEnabled, myAvatarId, name, participants, screenSharing]
   );
 
   // Tempo total que a sala teve mais de uma pessoa junto (não reseta se
@@ -1056,6 +1094,88 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
     );
   }
 
+  if (banned || moderationAction === "ban") {
+    return (
+      <AuthLayout>
+        <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 text-center shadow-2xl backdrop-blur-xl">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Você foi banido desta sala
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              O dono da sala removeu você e bloqueou novas entradas com essa conta ou navegador.
+            </p>
+          </div>
+          <Button size="lg" className="h-11 w-full rounded-xl text-sm" onClick={() => onNavigate("/")}>
+            Voltar ao início
+          </Button>
+        </Card>
+      </AuthLayout>
+    );
+  }
+
+  if (moderationAction === "kick") {
+    return (
+      <AuthLayout>
+        <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 text-center shadow-2xl backdrop-blur-xl">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Você foi removido da sala
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              O dono da sala encerrou sua participação. Você pode tentar entrar de novo.
+            </p>
+          </div>
+          <Button
+            size="lg"
+            className="h-11 w-full rounded-xl text-sm"
+            onClick={() => window.location.reload()}
+          >
+            Tentar entrar novamente
+          </Button>
+        </Card>
+      </AuthLayout>
+    );
+  }
+
+  // Enquanto a conexão inicial ainda não fechou (socket.io conectando +
+  // join-room ainda não confirmado), mostra isso em vez da sala em si —
+  // sem essa espera, dava pra ver por um instante uma UI incompleta (lista
+  // de participantes vazia enchendo aos poucos). Só existe na entrada; ver
+  // showInitialLoading acima pra não reaparecer numa reconexão no meio da
+  // chamada.
+  if (showInitialLoading) {
+    const showError = Boolean(error) && !requiresPassword;
+
+    return (
+      <AuthLayout>
+        <Card className="grid w-[min(420px,100%)] gap-5 rounded-3xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-9 text-center shadow-2xl backdrop-blur-xl">
+          <div className="mx-auto aspect-video w-2/3 max-w-56">
+            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+          </div>
+          {showError ? (
+            <>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                  Não foi possível entrar
+                </h1>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{error}</p>
+              </div>
+              <Button size="lg" className="h-11 w-full rounded-xl text-sm" onClick={() => onNavigate("/")}>
+                Voltar ao início
+              </Button>
+            </>
+          ) : (
+            <>
+              <Loader2 size={28} className="mx-auto animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Conectando à sala...</p>
+            </>
+          )}
+        </Card>
+      </AuthLayout>
+    );
+  }
+
   return (
     <main className="app-shell">
       {Object.entries(remoteMedia).map(([peerId, media]) =>
@@ -1167,6 +1287,9 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
             {allParticipants.map((participant) => {
               const isSelf = participant.id === "self";
               const isSpeaking = speakingIds.has(participant.id);
+              // Só o dono da sala pode moderar, e nunca a si mesmo (backend
+              // já bloqueia isso também, ver moderate-participant).
+              const canModerate = isOwner && !isSelf;
               const volume =
                 participantVolumes[participant.id] ??
                 getStoredParticipantVolume(participant.name) ??
@@ -1176,8 +1299,16 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
                 <div className="participant" key={participant.id}>
                   <div className="participant-row">
                     <div
-                      className={`avatar${isSpeaking ? " speaking" : ""}`}
+                      className={`avatar${isSpeaking ? " speaking" : ""}${canModerate ? " moderatable" : ""}`}
                       style={{ background: avatarGradient(participant.id) }}
+                      onClick={
+                        canModerate
+                          ? () => setModerationTarget({ id: participant.id, name: participant.name })
+                          : undefined
+                      }
+                      role={canModerate ? "button" : undefined}
+                      tabIndex={canModerate ? 0 : undefined}
+                      title={canModerate ? `Moderar ${participant.name}` : undefined}
                     >
                       <img
                         className={`avatar-img${participant.avatarUrl ? " photo" : ""}`}
@@ -1186,7 +1317,12 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
                       />
                     </div>
                     <div className="participant-copy">
-                      <strong>{participant.name}</strong>
+                      <strong>
+                        {participant.isOwner ? (
+                          <Crown size={12} className="owner-crown" title="Dono da sala" />
+                        ) : null}
+                        <span className="participant-name-text">{participant.name}</span>
+                      </strong>
                       <span>
                         {isSelf ? "Você · " : ""}
                         {participant.micEnabled ? "Microfone ativo" : "Microfone desligado"}
@@ -1246,31 +1382,29 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
         <section className="stage-column">
           <div className="stage" ref={stageRef}>
             {activeShares.length === 0 ? (
-              <div className="empty-stage">
-                <div className="empty-icon">
-                  <MonitorUp size={34} />
-                </div>
-                <h2>Nenhuma tela compartilhada</h2>
-                <p>Converse por áudio e compartilhe uma janela, aba ou monitor quando precisar.</p>
-                <button className="primary-button compact" onClick={toggleScreenShare}>
-                  <MonitorUp size={18} />
-                  Compartilhar minha tela
-                </button>
-                <p className="hint-text">
-                  {isFirefox
-                    ? "No Firefox, escolha \"Tela inteira\" (não uma janela ou aba) para ter a opção de compartilhar áudio, e só no Windows ou Linux; no macOS o Firefox ainda não oferece áudio do sistema."
-                    : "Para levar o áudio da aba ou da tela junto, marque a opção de compartilhar áudio na janela que o navegador abrir."}
-                  {!isElectronDesktop() ? (
-                    <>
-                      {" "}
-                      Quer o áudio de um app específico (tipo Discord ou Spotify)?{" "}
-                      <a href="/download" className="link-button inline">
-                        Baixe o app desktop do Pixia
-                      </a>
-                      , ele captura isso direto, sem configuração.
-                    </>
-                  ) : null}
-                </p>
+              <div className="gallery-grid">
+                {allParticipants.map((participant) => (
+                  <div className="gallery-tile" key={participant.id}>
+                    <div
+                      className={`avatar gallery${speakingIds.has(participant.id) ? " speaking" : ""}`}
+                      style={{ background: avatarGradient(participant.id) }}
+                    >
+                      <img
+                        className={`avatar-img${participant.avatarUrl ? " photo" : ""}`}
+                        src={resolveAvatarSrc(participant)}
+                        alt=""
+                      />
+                      {participant.isOwner ? (
+                        <span className="gallery-owner-badge" title="Dono da sala">
+                          <Crown size={12} />
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="gallery-name">
+                      {participant.id === "self" ? "Você" : participant.name}
+                    </span>
+                  </div>
+                ))}
               </div>
             ) : (
               <>
@@ -1462,37 +1596,101 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               ) : (
                 messages.map((item) => (
                   <article className="message" key={item.id}>
-                    <div>
-                      <strong>{item.user}</strong>
-                      <time>
-                        {new Date(item.timestamp).toLocaleTimeString("pt-BR", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </time>
+                    <div
+                      className="message-avatar"
+                      style={{ background: avatarGradient(item.user || item.id) }}
+                    >
+                      <img
+                        className={`avatar-img${item.avatarUrl ? " photo" : ""}`}
+                        src={resolveAvatarSrc({ avatarId: item.avatarId, avatarUrl: item.avatarUrl, id: item.id })}
+                        alt=""
+                      />
                     </div>
-                    <p>{item.message}</p>
+                    <div className="message-body">
+                      <div>
+                        <strong>{item.user}</strong>
+                        <time>{formatMessageTimestamp(item.timestamp)}</time>
+                      </div>
+                      <p>{item.message}</p>
+                    </div>
                   </article>
                 ))
               )}
             </div>
 
-            <div className="chat-input-area">
-              <textarea
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                onKeyDown={handleMessageKeyDown}
-                placeholder="Digite uma mensagem..."
-                rows={1}
-                maxLength={2000}
-              />
-              <button onClick={handleSend} title="Enviar mensagem">
-                <Send size={18} />
-              </button>
-            </div>
+            {currentUser ? (
+              <div className="chat-input-area">
+                <textarea
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  onKeyDown={handleMessageKeyDown}
+                  placeholder="Digite uma mensagem..."
+                  rows={1}
+                  maxLength={2000}
+                />
+                <button onClick={handleSend} title="Enviar mensagem">
+                  <Send size={18} />
+                </button>
+              </div>
+            ) : (
+              <div className="chat-locked">
+                <Lock size={14} />
+                <span>
+                  Somente usuário logados podem enviar mensagens.{" "}
+                  <button type="button" onClick={() => onNavigate("/cadastro")}>
+                    Criar conta
+                  </button>{" "}
+                  ou{" "}
+                  <button type="button" onClick={() => onNavigate("/entrar")}>
+                    entrar
+                  </button>
+                  .
+                </span>
+              </div>
+            )}
           </aside>
         ) : null}
       </section>
+
+      <Dialog open={Boolean(moderationTarget)} onOpenChange={(next) => !next && setModerationTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Moderar {moderationTarget?.name}</DialogTitle>
+            <DialogDescription>Escolha o que fazer com esse participante.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="sm:flex-col sm:gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full justify-start"
+              onClick={() => {
+                moderateParticipant(moderationTarget.id, "kick");
+                setModerationTarget(null);
+              }}
+            >
+              <UserX size={16} />
+              Expulsar
+              <span className="ml-auto text-xs font-normal text-muted-foreground">Só remove da sala</span>
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={() => {
+                moderateParticipant(moderationTarget.id, "ban");
+                setModerationTarget(null);
+              }}
+            >
+              <Ban size={16} />
+              Banir
+              <span className="ml-auto text-xs font-normal opacity-80">Remove e bloqueia a volta</span>
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => setModerationTarget(null)}>
+              Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

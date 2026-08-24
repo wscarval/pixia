@@ -35,7 +35,7 @@ import {
 
 const MIN_ROOM_PASSWORD_LENGTH = 6;
 
-function RoomRow({ room, onDelete, onUpdatePassword }) {
+function RoomRow({ room, onDelete, onUpdatePassword, onNavigate }) {
   const [editingPassword, setEditingPassword] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -113,6 +113,15 @@ function RoomRow({ room, onDelete, onUpdatePassword }) {
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onNavigate(`/r/${room.slug}`)}
+            title="Entrar na sala"
+          >
+            <ArrowRight size={15} />
+          </Button>
+
           <Button variant="ghost" size="icon" onClick={copyLink} title="Copiar link">
             {copied ? <Check size={15} /> : <Copy size={15} />}
           </Button>
@@ -360,34 +369,36 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
 
   return (
     <main className="min-h-screen">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
-            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+      <header className="border-b border-white/5 px-6 py-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
+              <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+            </div>
+            <div className="min-w-0">
+              <strong className="block text-sm font-semibold text-foreground">Meus links</strong>
+              <span className="block truncate text-xs text-muted-foreground">{user?.name}</span>
+            </div>
           </div>
-          <div className="min-w-0">
-            <strong className="block text-sm font-semibold text-foreground">Meus links</strong>
-            <span className="block truncate text-xs text-muted-foreground">{user?.name}</span>
-          </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={() => onNavigate("/conta")}>
-            <User size={16} />
-            Minha conta
-          </Button>
-          <Button variant="secondary" onClick={() => onNavigate("/")}>
-            <Home size={16} />
-            Ir para entrada
-          </Button>
-          <Button variant="secondary" onClick={logout}>
-            <LogOut size={16} />
-            Sair
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => onNavigate("/conta")}>
+              <User size={16} />
+              Minha conta
+            </Button>
+            <Button variant="secondary" onClick={() => onNavigate("/")}>
+              <Home size={16} />
+              Ir para entrada
+            </Button>
+            <Button variant="secondary" onClick={logout}>
+              <LogOut size={16} />
+              Sair
+            </Button>
+          </div>
         </div>
       </header>
 
-      <div className="grid grid-cols-[minmax(0,320px)_1fr] items-start gap-6 p-6 max-lg:grid-cols-1">
+      <div className="mx-auto grid w-full max-w-4xl grid-cols-[minmax(0,320px)_1fr] items-start gap-6 p-6 max-lg:grid-cols-1">
         <Card className="rounded-2xl border-white/8 bg-linear-to-b from-card/95 to-card/80 p-6">
           <form onSubmit={createRoom} className="grid gap-4">
             <h2 className="text-base font-semibold text-foreground">Criar novo link</h2>
@@ -457,13 +468,14 @@ export default function LinksPanel({ user, onNavigate, onLogout }) {
               room={room}
               onDelete={deleteRoom}
               onUpdatePassword={updatePassword}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
       </div>
 
       {visitedRooms.length > 0 || visitedLoading ? (
-        <div className="grid gap-3 px-6 pb-6">
+        <div className="mx-auto grid w-full max-w-4xl gap-3 px-6 pb-6">
           <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
             <History size={17} />
             Salas acessadas de outros usuários

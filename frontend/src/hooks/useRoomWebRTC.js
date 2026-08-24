@@ -16,7 +16,7 @@ import {
 } from "../lib/preferences.js";
 import { playSoundEffect } from "../lib/soundEffects.js";
 import { watchSpeakingLevel } from "../lib/speakingDetector.js";
-import { getToken } from "../lib/session.js";
+import { getGuestId, getToken } from "../lib/session.js";
 
 export const ELECTRON_APP_PREFIX = "electron-app:";
 
@@ -68,19 +68,49 @@ async function getConnectionRtt(pc) {
   return null;
 }
 
+function randomId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Ver o comentário de clientIdRef mais abaixo: precisa sobreviver a um F5
+// pra não parecer uma aba nova a cada recarregamento.
+function getOrCreateTabClientId() {
+  try {
+    let clientId = sessionStorage.getItem("pixia-tab-client-id");
+    if (!clientId) {
+      clientId = randomId();
+      sessionStorage.setItem("pixia-tab-client-id", clientId);
+    }
+    return clientId;
+  } catch {
+    // sessionStorage indisponível (modo privado restrito etc.): sem
+    // persistência entre F5s, mas não trava o join por causa disso.
+    return randomId();
+  }
+}
+
 export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avatarUrl }) {
   const socketRef = useRef(null);
   const selfIdRef = useRef(null);
   // Identifica essa aba (não essa pessoa) de forma estável entre
-  // reconexões automáticas do socket.io: numa rede instável, o cliente
-  // reconecta com um socket.id novo antes do servidor perceber que o
-  // antigo morreu, e sem isso a sala mostra a mesma pessoa duas vezes até
-  // o heartbeat expirar. Ver roomClientSockets no backend.
-  const clientIdRef = useRef(
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
+  // reconexões automáticas do socket.io E entre F5s manuais: numa rede
+  // instável, ou quando a pessoa recarrega a página, o cliente reconecta
+  // com um socket.id novo antes do servidor perceber que o antigo morreu
+  // (até 45s de heartbeat), e sem isso a sala mostra a mesma pessoa duas
+  // (ou mais, se recarregar várias vezes seguidas) vezes até expirar. Ver
+  // roomClientSockets no backend.
+  //
+  // Precisa ler/escrever em sessionStorage (não só um useRef) porque um F5
+  // de verdade destrói e recria a árvore React inteira — um useRef sozinho
+  // geraria um UUID novo a cada recarregamento, nunca reconhecido pelo
+  // backend como "a mesma aba", e é exatamente isso que causava o bug de
+  // duplicar participante ao atualizar a tela várias vezes. sessionStorage
+  // sobrevive ao F5 mas não vaza pra outra aba (é por aba, não por
+  // navegador inteiro) — mantém intacta a detecção de aba-clone via
+  // BroadcastChannel logo abaixo, que depende de cada aba ter o seu.
+  const clientIdRef = useRef(getOrCreateTabClientId());
   const peersRef = useRef(new Map());
   // Toca o som de entrada só na primeira vez que a gente entra, não em
   // reconexões automáticas depois de uma rede instável (senão o som toca de
@@ -128,6 +158,15 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
   // websocket direito, não o app em si.
   const [transport, setTransport] = useState(null);
   const [requiresPassword, setRequiresPassword] = useState(false);
+  const [banned, setBanned] = useState(false);
+  // Só true pra quem está logado E é a conta dona da sala (ver
+  // socket.data.isOwner no backend) — habilita o menu de expulsar/banir nos
+  // outros participantes.
+  const [isOwner, setIsOwner] = useState(false);
+  // "kick" | "ban" | null — preenchido quando ESSE cliente é o alvo de uma
+  // moderação (ver moderation-action abaixo). A UI usa isso pra mostrar por
+  // que a chamada caiu, em vez de um "conexão perdida" genérico.
+  const [moderationAction, setModerationAction] = useState(null);
   const [screenQuality, setScreenQuality] = useState(screenQualityRef.current);
   const autoEnableMicRef = useRef(getPreferredMicEnabled());
 
@@ -484,7 +523,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
         setError(
           localHost
             ? "O WebRTC não conseguiu criar uma rota local. Verifique firewall/VPN e teste também em duas abas do mesmo navegador."
-            : "O WebRTC não conseguiu criar uma rota entre os participantes. Nesta rede, configure um servidor TURN."
+            : "O WebRTC não conseguiu criar uma rota entre os participantes. Tentando alternativas..."
         );
         return;
       }
@@ -673,6 +712,9 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
           // roomAccountSockets no backend) — abrir várias abas de propósito
           // não devia criar "clones" da mesma pessoa na lista.
           accountToken: getToken(),
+          // Só usado se NÃO estiver logado — é o que permite o dono da sala
+          // banir um visitante anônimo (ver RoomBan no backend).
+          guestId: getToken() ? undefined : getGuestId(),
         },
         (response) => {
           if (!active) return;
@@ -680,11 +722,14 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
           if (!response?.ok) {
             setError(response?.message || "Não foi possível entrar na sala.");
             if (response?.requiresPassword) setRequiresPassword(true);
+            if (response?.banned) setBanned(true);
             return;
           }
 
           setRequiresPassword(false);
+          setBanned(false);
           setJoined(true);
+          setIsOwner(Boolean(response.isOwner));
           selfIdRef.current = response.selfId;
           const existing = response.participants || [];
           setParticipants(existing);
@@ -733,6 +778,16 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
         }
       });
       peersRef.current.clear();
+    });
+
+    // O dono da sala expulsou/baniu ESSE cliente (ver moderate-participant
+    // no backend) — desconecta pela própria vontade (não deixa o socket.io
+    // tentar reconectar sozinho, já que pro servidor isso pareceria só mais
+    // uma queda de rede) e guarda qual foi a ação pra UI explicar o motivo.
+    socket.on("moderation-action", ({ action } = {}) => {
+      if (!active) return;
+      setModerationAction(action === "ban" ? "ban" : "kick");
+      socket.disconnect();
     });
 
     socket.on("connect_error", (socketError) => {
@@ -1154,10 +1209,24 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
   }, [startScreenShare, stopScreenShare]);
 
   const sendMessage = useCallback((message) => {
+    // Espelha o bloqueio do backend (ver chat-message em server.js): só
+    // conta logada manda mensagem, visitante anônimo só lê. Checagem real é
+    // a de lá; essa aqui só evita mandar algo que o servidor vai descartar.
+    if (!getToken()) return;
+
     const clean = String(message || "").trim();
     if (!clean) return;
 
     socketRef.current?.emit("chat-message", { message: clean });
+  }, []);
+
+  // Só o dono da sala pode chamar isso (backend confere de novo — ver
+  // socket.data.isOwner em moderate-participant). "kick" derruba sem
+  // registrar nada; "ban" também grava um RoomBan que barra join-room
+  // futuro dessa mesma identidade (conta ou guestId).
+  const moderateParticipant = useCallback((targetId, action) => {
+    if (!targetId || (action !== "kick" && action !== "ban")) return;
+    socketRef.current?.emit("moderate-participant", { targetId, action });
   }, []);
 
   // Ensurdecer é um controle só de exibição local (não muda nada no
@@ -1172,6 +1241,9 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
     connected,
     joined,
     supersededByTab,
+    banned,
+    isOwner,
+    moderationAction,
     pingMs,
     participants,
     remoteMedia,
@@ -1191,6 +1263,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
     changeScreenQuality,
     toggleScreenShare,
     sendMessage,
+    moderateParticipant,
     broadcastDeafened,
   };
 }

@@ -191,6 +191,7 @@ async function getRoomParticipants(roomId, ignoreSocketId = null) {
       micEnabled: Boolean(client.data.micEnabled),
       screenSharing: Boolean(client.data.screenSharing),
       deafened: Boolean(client.data.deafened),
+      isOwner: Boolean(client.data.isOwner),
     }));
 }
 
@@ -231,6 +232,27 @@ io.on("connection", (socket) => {
         return;
       }
 
+      const accountUserId = verifyAccountToken(payload.accountToken);
+      // Visitante anônimo não tem accountUserId pra identificar, então usa
+      // esse id gerado e guardado no localStorage do navegador dele (ver
+      // guestId no cliente) — não é IP de propósito (ver RoomBan no schema).
+      const guestId = accountUserId ? null : sanitizeClientId(payload.guestId);
+
+      const ban = accountUserId
+        ? await prisma.roomBan.findUnique({
+            where: { roomId_userId: { roomId: persistedRoom.id, userId: accountUserId } },
+          })
+        : guestId
+          ? await prisma.roomBan.findUnique({
+              where: { roomId_guestId: { roomId: persistedRoom.id, guestId } },
+            })
+          : null;
+
+      if (ban) {
+        callback({ ok: false, banned: true, message: "Você foi banido desta sala." });
+        return;
+      }
+
       // Caso o socket já esteja em outra sala da aplicação.
       if (socket.data.roomId && socket.data.roomId !== roomId) {
         await socket.leave(socket.data.roomId);
@@ -256,7 +278,6 @@ io.on("connection", (socket) => {
       // não é reconexão (clientId é outro), é a mesma pessoa de propósito.
       // Derruba a aba antiga — a nova "assume" a presença na sala, como a
       // maioria dos apps de chamada faz.
-      const accountUserId = verifyAccountToken(payload.accountToken);
       const accountKey = roomAccountKey(roomId, accountUserId);
       if (accountKey) {
         const staleSocketId = roomAccountSockets.get(accountKey);
@@ -275,6 +296,10 @@ io.on("connection", (socket) => {
       socket.data.name = name;
       socket.data.clientId = clientId;
       socket.data.accountUserId = accountUserId;
+      socket.data.guestId = guestId;
+      // Só a conta dona da sala pode expulsar/banir (ver moderate-participant
+      // abaixo) — sala anônima nunca tem dono, então nunca tem moderador.
+      socket.data.isOwner = Boolean(accountUserId && persistedRoom.ownerId === accountUserId);
       // Da conta (se logado) ou sorteado no cliente (se anônimo) — o
       // servidor só repassa pros outros participantes, não decide o valor.
       socket.data.avatarId = sanitizeAvatarId(payload.avatarId);
@@ -312,12 +337,15 @@ io.on("connection", (socket) => {
       callback({
         ok: true,
         selfId: socket.id,
+        isOwner: socket.data.isOwner,
         participants: existingParticipants,
         messages: chatHistory
           ? chatHistory.map((item) => ({
               id: item.id,
               userId: null,
               user: item.userName,
+              avatarId: item.userAvatarId || null,
+              avatarUrl: item.userAvatarUrl || null,
               message: item.message,
               timestamp: item.createdAt.toISOString(),
             }))
@@ -332,6 +360,7 @@ io.on("connection", (socket) => {
         micEnabled: false,
         screenSharing: false,
         deafened: false,
+        isOwner: socket.data.isOwner,
       });
 
       console.log(`[room:${roomId}] ${name} entrou (${socket.id})`);
@@ -392,14 +421,23 @@ io.on("connection", (socket) => {
     const cleanMessage = sanitizeMessage(message);
 
     if (!roomId || !cleanMessage) return;
+    // Só conta logada manda mensagem (ver o mesmo bloqueio no cliente,
+    // useRoomWebRTC.sendMessage) — visitante anônimo só lê o chat. Isso aqui
+    // é o que vale de verdade: o bloqueio do cliente é só UX, alguém
+    // manipulando o socket direto ainda cairia aqui.
+    if (!socket.data.accountUserId) return;
     if (isChatRateLimited(socket)) return;
 
     const userName = socket.data.name || "Usuário";
+    const avatarId = socket.data.avatarId || null;
+    const avatarUrl = socket.data.avatarUrl || null;
 
     io.to(roomId).emit("chat-message", {
       id: crypto.randomUUID(),
       userId: socket.id,
       user: userName,
+      avatarId,
+      avatarUrl,
       message: cleanMessage,
       timestamp: new Date().toISOString(),
     });
@@ -411,6 +449,8 @@ io.on("connection", (socket) => {
           data: {
             roomId: socket.data.roomDbId,
             userName,
+            userAvatarId: avatarId,
+            userAvatarUrl: avatarUrl,
             message: cleanMessage,
           },
         });
@@ -418,6 +458,63 @@ io.on("connection", (socket) => {
         console.error("[chat-message] falha ao salvar histórico", error);
       }
     }
+  });
+
+  // Só o dono da sala (ver socket.data.isOwner no join-room) pode expulsar
+  // ou banir. "kick" só derruba o socket (a pessoa pode entrar de novo, na
+  // hora até); "ban" faz o mesmo e ainda grava um RoomBan, checado no
+  // início do join-room de qualquer tentativa futura.
+  socket.on("moderate-participant", async ({ targetId, action } = {}) => {
+    const roomId = socket.data.roomId;
+    if (!roomId || !socket.data.isOwner) return;
+    if (action !== "kick" && action !== "ban") return;
+    if (!targetId || targetId === socket.id) return;
+
+    const targetSocket = io.sockets.sockets.get(targetId);
+    if (!targetSocket || targetSocket.data.roomId !== roomId) return;
+
+    if (action === "ban") {
+      try {
+        if (targetSocket.data.accountUserId) {
+          await prisma.roomBan.upsert({
+            where: {
+              roomId_userId: { roomId: socket.data.roomDbId, userId: targetSocket.data.accountUserId },
+            },
+            update: {},
+            create: {
+              roomId: socket.data.roomDbId,
+              userId: targetSocket.data.accountUserId,
+              bannedName: targetSocket.data.name || "Usuário",
+            },
+          });
+        } else if (targetSocket.data.guestId) {
+          await prisma.roomBan.upsert({
+            where: {
+              roomId_guestId: { roomId: socket.data.roomDbId, guestId: targetSocket.data.guestId },
+            },
+            update: {},
+            create: {
+              roomId: socket.data.roomDbId,
+              guestId: targetSocket.data.guestId,
+              bannedName: targetSocket.data.name || "Usuário",
+            },
+          });
+        } else {
+          console.warn(`[moderate-participant] ban sem userId/guestId pra derrubar (${targetId}), só expulsando`);
+        }
+      } catch (error) {
+        console.error("[moderate-participant] falha ao banir", error);
+      }
+    }
+
+    io.to(targetId).emit("moderation-action", { action });
+    targetSocket.disconnect(true);
+
+    console.log(
+      `[room:${roomId}] ${socket.data.name || socket.id} ${action === "ban" ? "baniu" : "expulsou"} ${
+        targetSocket.data.name || targetId
+      }`
+    );
   });
 
   socket.on("disconnecting", () => {

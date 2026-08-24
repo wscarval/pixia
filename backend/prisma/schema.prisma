@@ -17,6 +17,7 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   rooms        Room[]
   roomVisits   RoomVisit[]
+  roomBans     RoomBan[]
 
   @@map("users")
 }
@@ -33,6 +34,7 @@ model Room {
   creatorIp    String?  @map("creator_ip")
   chatMessages ChatMessage[]
   visits       RoomVisit[]
+  bans         RoomBan[]
 
   @@index([creatorIp])
   @@map("rooms")
@@ -55,16 +57,41 @@ model RoomVisit {
   @@map("room_visits")
 }
 
-// Histórico de chat, salvo só para salas particulares (têm senha e dono
-// esperados) para não perder as mensagens quando alguém recarrega a página.
+// Histórico de chat de toda sala (pública/anônima ou não) — some sozinho
+// quando a sala é apagada (cascade), inclusive salas anônimas expiradas.
 model ChatMessage {
-  id        String   @id @default(uuid())
-  roomId    String   @map("room_id")
-  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  userName  String   @map("user_name")
-  message   String
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid())
+  roomId        String   @map("room_id")
+  room          Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userName      String   @map("user_name")
+  userAvatarId  Int?     @map("user_avatar_id")
+  userAvatarUrl String?  @map("user_avatar_url")
+  message       String
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([roomId, createdAt])
   @@map("chat_messages")
+}
+
+// Expulsão (não fica registrada, só derruba o socket) x banimento (fica
+// registrado aqui, bloqueia join-room futuro nessa sala). Conta logada
+// banida por userId; visitante anônimo por guestId (um UUID persistido no
+// localStorage do navegador dele, não por IP — banir por IP bloquearia
+// qualquer outra pessoa na mesma rede/NAT junto, o que já foi rejeitado
+// antes nesse projeto pra outro uso). Cada linha é UM tipo de identidade
+// banida; os dois índices UNIQUE de baixo garantem que não duplica.
+model RoomBan {
+  id         String   @id @default(uuid())
+  roomId     String   @map("room_id")
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestId    String?  @map("guest_id")
+  bannedName String   @map("banned_name")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([roomId, userId])
+  @@unique([roomId, guestId])
+  @@index([roomId])
+  @@map("room_bans")
 }

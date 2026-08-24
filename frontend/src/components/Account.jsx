@@ -261,36 +261,40 @@ export default function Account({ user, onNavigate, onUserUpdated, pinnedRoom, o
   return (
     <main className="min-h-screen">
       {pinnedRoom ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-success/20 bg-success/10 px-6 py-2.5 text-sm text-success">
-          <span className="flex items-center gap-2">
-            <span className="size-2 shrink-0 rounded-full bg-success" />
-            Conectado em {pinnedRoom.displayName || `/r/${pinnedRoom.roomId}`}
-          </span>
-          <Button type="button" variant="secondary" size="sm" onClick={onReturnToRoom}>
-            <ArrowLeft size={14} />
-            Voltar à sala
-          </Button>
+        <div className="border-b border-success/20 bg-success/10 px-6 py-2.5 text-sm text-success">
+          <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-3">
+            <span className="flex items-center gap-2">
+              <span className="size-2 shrink-0 rounded-full bg-success" />
+              Conectado em {pinnedRoom.displayName || `/r/${pinnedRoom.roomId}`}
+            </span>
+            <Button type="button" variant="secondary" size="sm" onClick={onReturnToRoom}>
+              <ArrowLeft size={14} />
+              Voltar à sala
+            </Button>
+          </div>
         </div>
       ) : null}
 
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
-            <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+      <header className="border-b border-white/5 px-6 py-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-18 shrink-0 overflow-hidden rounded-xl">
+              <img src="/pixia.png" alt="Pixia" className="h-full w-full object-contain" />
+            </div>
+            <div className="min-w-0">
+              <strong className="block text-sm font-semibold text-foreground">Minha conta</strong>
+              <span className="block truncate text-xs text-muted-foreground">{user?.email}</span>
+            </div>
           </div>
-          <div className="min-w-0">
-            <strong className="block text-sm font-semibold text-foreground">Minha conta</strong>
-            <span className="block truncate text-xs text-muted-foreground">{user?.email}</span>
-          </div>
-        </div>
 
-        <Button variant="secondary" onClick={() => onNavigate("/painel")}>
-          <Link2 size={16} />
-          Meus links
-        </Button>
+          <Button variant="secondary" onClick={() => onNavigate("/painel")}>
+            <Link2 size={16} />
+            Meus links
+          </Button>
+        </div>
       </header>
 
-      <div className="grid grid-cols-2 items-start gap-6 p-6 max-lg:grid-cols-1">
+      <div className="mx-auto grid w-full max-w-4xl grid-cols-2 items-start gap-6 p-6 max-lg:grid-cols-1">
         <Card className="col-span-2 gap-4 rounded-2xl border-white/8 bg-card p-6">
           <h2 className="text-base font-semibold text-foreground">Foto de perfil</h2>
 

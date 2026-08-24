@@ -6,6 +6,27 @@ export function getToken() {
   return localStorage.getItem("webrtc-token") || null;
 }
 
+// Identifica esse NAVEGADOR (não essa aba, ver clientId em useRoomWebRTC;
+// não essa conta) de forma estável entre sessões — só usado pra dar a quem
+// não tem conta algo estável o suficiente pra um banimento de sala segurar
+// (ver RoomBan no backend). Gerado uma vez e reaproveitado depois.
+const GUEST_ID_KEY = "pixia-guest-id";
+
+export function getGuestId() {
+  try {
+    let guestId = localStorage.getItem(GUEST_ID_KEY);
+    if (!guestId) {
+      guestId = crypto.randomUUID().replaceAll("-", "");
+      localStorage.setItem(GUEST_ID_KEY, guestId);
+    }
+    return guestId;
+  } catch {
+    // localStorage indisponível: sem persistência entre sessões, mas não
+    // trava o join por causa disso.
+    return crypto.randomUUID().replaceAll("-", "");
+  }
+}
+
 export function getStoredUser() {
   try {
     const raw = localStorage.getItem("webrtc-user");
