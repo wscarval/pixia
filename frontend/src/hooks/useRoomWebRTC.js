@@ -21,8 +21,9 @@ import { getToken } from "../lib/session.js";
 export const ELECTRON_APP_PREFIX = "electron-app:";
 
 const SCREEN_QUALITY_PRESETS = {
-  "720p": { width: 1280, height: 720 },
-  "1080p": { width: 1920, height: 1080 },
+  "720p30": { width: 1280, height: 720, frameRate: 30 },
+  "720p60": { width: 1280, height: 720, frameRate: 60 },
+  "1080p30": { width: 1920, height: 1080, frameRate: 30 },
 };
 
 // O TURN não usa mais credencial fixa embutida no bundle (ela nunca
@@ -126,7 +127,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
   const autoEnableMicRef = useRef(getPreferredMicEnabled());
 
   const changeScreenQuality = useCallback((quality) => {
-    const next = quality === "720p" ? "720p" : "1080p";
+    const next = SCREEN_QUALITY_PRESETS[quality] ? quality : "720p30";
     screenQualityRef.current = next;
     setScreenQuality(next);
     setPreferredScreenQuality(next);
@@ -1033,10 +1034,10 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       // "ideal", não "exact": o navegador ainda pode entregar outra coisa
       // (ex: a tela de origem já é menor que o preset), mas ele tenta
       // capturar/reamostrar nessa resolução em vez de mandar no tamanho nativo.
-      const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS["1080p"];
+      const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current] || SCREEN_QUALITY_PRESETS["720p30"];
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          frameRate: { ideal: 30, max: 60 },
+          frameRate: { ideal: preset.frameRate, max: preset.frameRate },
           width: { ideal: preset.width },
           height: { ideal: preset.height },
         },
@@ -1057,16 +1058,24 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId }) {
       const track = stream.getVideoTracks()[0];
       let audioTrack = stream.getAudioTracks()[0];
 
-      // Sem isso, o encoder pode preferir manter a resolução e sacrificar
-      // frames quando a CPU aperta (comportamento padrão "balanced"/
-      // "maintain-resolution" do WebRTC) — no Electron, sem aceleração de
-      // hardware disponível pro encoder tão facilmente quanto num navegador
-      // normal, isso acontece com muito mais frequência, e o efeito
-      // observado é "perde FPS". "motion" faz o RTCRtpSender usar
-      // degradationPreference "maintain-framerate" automaticamente (ver
-      // MediaStreamTrack Content Hints, W3C): quando aperta, reduz
-      // resolução antes de derrubar frames, não o contrário.
-      track.contentHint = "motion";
+      // Só no app desktop Electron: sem aceleração de hardware disponível
+      // pro encoder tão facilmente quanto num navegador normal, o encoder
+      // recorre a "maintain-resolution" (o padrão) com mais frequência lá,
+      // e o efeito observado era "perde FPS". "motion" faz o RTCRtpSender
+      // usar degradationPreference "maintain-framerate" automaticamente
+      // (ver MediaStreamTrack Content Hints, W3C): quando aperta, reduz
+      // resolução antes de derrubar frames.
+      //
+      // Só pro Electron mesmo: aplicar isso também no navegador (onde o
+      // compartilhamento já funcionava bem) fazia o vídeo começar borrado
+      // no primeiro compartilhamento (o encoder força uma resolução baixa
+      // logo de cara, antes da estimativa de banda/CPU se estabilizar, e
+      // some só recomeçando o compartilhamento) — o navegador já teria
+      // "maintain-resolution" (ou perto disso) como comportamento padrão
+      // pra conteúdo de tela, que é o que queremos lá.
+      if (isElectronDesktop()) {
+        track.contentHint = "motion";
+      }
 
       // No app desktop Electron, compartilhar uma janela específica (não a
       // tela inteira) não usa o loopback de áudio do sistema inteiro — ver

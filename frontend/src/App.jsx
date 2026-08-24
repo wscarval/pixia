@@ -1118,8 +1118,9 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword }
                   : "Qualidade do compartilhamento de tela"
               }
             >
-              <option value="720p">720p</option>
-              <option value="1080p">1080p</option>
+              <option value="720p30">720p · 30 FPS</option>
+              <option value="720p60">720p · 60 FPS</option>
+              <option value="1080p30">1080p · 30 FPS</option>
             </select>
 
             <button

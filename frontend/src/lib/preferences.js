@@ -44,14 +44,16 @@ export function setPreferredMicEnabled(enabled) {
   writeAll(prefs);
 }
 
+const SCREEN_QUALITY_IDS = ["720p30", "720p60", "1080p30"];
+
 export function getPreferredScreenQuality() {
   const value = readAll().screenQuality;
-  return value === "720p" ? "720p" : "1080p";
+  return SCREEN_QUALITY_IDS.includes(value) ? value : "720p30";
 }
 
 export function setPreferredScreenQuality(quality) {
   const prefs = readAll();
-  prefs.screenQuality = quality === "720p" ? "720p" : "1080p";
+  prefs.screenQuality = SCREEN_QUALITY_IDS.includes(quality) ? quality : "720p30";
   writeAll(prefs);
 }
 
