@@ -44,7 +44,7 @@ export function setPreferredMicEnabled(enabled) {
   writeAll(prefs);
 }
 
-const SCREEN_QUALITY_IDS = ["720p30", "720p60", "1080p30"];
+const SCREEN_QUALITY_IDS = ["720p30", "1080p60", "1440p60"];
 
 export function getPreferredScreenQuality() {
   const value = readAll().screenQuality;
@@ -54,6 +54,21 @@ export function getPreferredScreenQuality() {
 export function setPreferredScreenQuality(quality) {
   const prefs = readAll();
   prefs.screenQuality = SCREEN_QUALITY_IDS.includes(quality) ? quality : "720p30";
+  writeAll(prefs);
+}
+
+// Perfil de qualidade (nitidez x fluidez) — ver SCREEN_SHARE_MODES em
+// useRoomWebRTC.js. Independente da resolução acima.
+const SCREEN_SHARE_MODE_IDS = ["auto", "detail", "motion"];
+
+export function getPreferredScreenShareMode() {
+  const value = readAll().screenShareMode;
+  return SCREEN_SHARE_MODE_IDS.includes(value) ? value : "auto";
+}
+
+export function setPreferredScreenShareMode(mode) {
+  const prefs = readAll();
+  prefs.screenShareMode = SCREEN_SHARE_MODE_IDS.includes(mode) ? mode : "auto";
   writeAll(prefs);
 }
 

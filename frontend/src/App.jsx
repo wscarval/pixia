@@ -25,6 +25,7 @@ import {
   MonitorUp,
   Play,
   Send,
+  SlidersHorizontal,
   User,
   Users,
   UserX,
@@ -77,6 +78,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 const AVATAR_PALETTE = [
   ["#8b5cf6", "#6d28d9"],
@@ -85,6 +88,15 @@ const AVATAR_PALETTE = [
   ["#34d399", "#047857"],
   ["#fbbf24", "#b45309"],
   ["#60a5fa", "#1d4ed8"],
+];
+
+// Perfis de qualidade da transmissão de tela — o "o quê" (rótulo/descrição)
+// mora aqui na UI; o "como" (contentHint/degradationPreference/bitrate)
+// mora em SCREEN_SHARE_MODES, dentro de useRoomWebRTC.js.
+const SCREEN_SHARE_MODE_OPTIONS = [
+  { id: "auto", label: "Automático", description: "Recomendado para a maioria dos casos" },
+  { id: "detail", label: "Texto e trabalho", description: "Mais nitidez para textos e telas" },
+  { id: "motion", label: "Jogos e vídeo", description: "Mais fluidez para movimento" },
 ];
 
 const MIN_ROOM_PASSWORD_LENGTH = 6;
@@ -850,6 +862,8 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
     toggleMicrophone,
     screenQuality,
     changeScreenQuality,
+    screenMode,
+    changeScreenMode,
     toggleScreenShare,
     sendMessage,
     moderateParticipant,
@@ -1553,6 +1567,38 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               ) : null}
             </select>
 
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="device-select inline-flex items-center justify-center gap-1.5"
+                  type="button"
+                  title="Qualidade da transmissão"
+                >
+                  <SlidersHorizontal size={13} />
+                  {SCREEN_SHARE_MODE_OPTIONS.find((option) => option.id === screenMode)?.label ||
+                    "Automático"}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72">
+                <PopoverTitle>Qualidade da transmissão</PopoverTitle>
+                <RadioGroup value={screenMode} onValueChange={changeScreenMode} className="mt-1.5">
+                  {SCREEN_SHARE_MODE_OPTIONS.map((option) => (
+                    <label
+                      key={option.id}
+                      htmlFor={`screen-mode-${option.id}`}
+                      className="flex cursor-pointer items-start gap-2.5 rounded-md p-1.5 hover:bg-accent"
+                    >
+                      <RadioGroupItem id={`screen-mode-${option.id}`} value={option.id} className="mt-0.5" />
+                      <span className="grid gap-0.5">
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </PopoverContent>
+            </Popover>
+
             <select
               className="device-select"
               value={screenQuality}
@@ -1565,8 +1611,8 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               }
             >
               <option value="720p30">720p · 30 FPS</option>
-              <option value="720p60">720p · 60 FPS</option>
-              <option value="1080p30">1080p · 30 FPS</option>
+              <option value="1080p60">1080p · 60 FPS</option>
+              <option value="1440p60">1440p · 60 FPS</option>
             </select>
 
             <button

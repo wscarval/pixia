@@ -10,9 +10,11 @@ import {
   getPreferredAudioInputId,
   getPreferredMicEnabled,
   getPreferredScreenQuality,
+  getPreferredScreenShareMode,
   setPreferredAudioInputId,
   setPreferredMicEnabled,
   setPreferredScreenQuality,
+  setPreferredScreenShareMode,
 } from "../lib/preferences.js";
 import { playSoundEffect } from "../lib/soundEffects.js";
 import { watchSpeakingLevel } from "../lib/speakingDetector.js";
@@ -20,11 +22,82 @@ import { getGuestId, getToken } from "../lib/session.js";
 
 export const ELECTRON_APP_PREFIX = "electron-app:";
 
+// Só resolução/fps — 3 opções fixas de propósito (simplifica o que era uma
+// grade de presets independentes de fps). O MODO (ver SCREEN_SHARE_MODES
+// abaixo) é o eixo separado que decide como o encoder se comporta sob
+// pressão de banda/CPU, não a resolução em si.
 const SCREEN_QUALITY_PRESETS = {
   "720p30": { width: 1280, height: 720, frameRate: 30 },
-  "720p60": { width: 1280, height: 720, frameRate: 60 },
-  "1080p30": { width: 1920, height: 1080, frameRate: 30 },
+  "1080p60": { width: 1920, height: 1080, frameRate: 60 },
+  "1440p60": { width: 2560, height: 1440, frameRate: 60 },
 };
+
+// Perfil de qualidade da transmissão: como o RTCRtpSender prioriza
+// nitidez x fluidez quando a rede/CPU aperta. Independente da resolução
+// escolhida (SCREEN_QUALITY_PRESETS) — essa parte é sobre COMPORTAMENTO do
+// encoder, não sobre width/height/fps de captura.
+const SCREEN_SHARE_MODES = {
+  auto: {
+    // Sem dica de conteúdo própria: deixa o navegador decidir sozinho.
+    contentHint: "",
+    degradationPreference: "balanced",
+    maxBitrate: null,
+  },
+  detail: {
+    // Prioriza nitidez (texto, código, planilha) — sacrifica fps antes de
+    // borrar a imagem quando precisa cortar banda.
+    contentHint: "detail",
+    degradationPreference: "maintain-resolution",
+    maxBitrate: 7_000_000,
+  },
+  motion: {
+    // Prioriza fluidez (jogos, vídeo, animação).
+    contentHint: "motion",
+    degradationPreference: "balanced",
+    maxBitrate: 12_500_000,
+  },
+};
+
+// No app desktop Electron, "Automático" sem ajuda nenhuma reproduz um bug
+// antigo (perda de FPS: sem aceleração de hardware fácil pro encoder lá,
+// ele cai com mais frequência pro "maintain-resolution" default e o efeito
+// observado era perder quadros). Só nesse caso específico (modo automático
+// + Electron), empresta o comportamento do modo "Jogos e vídeo" pra evitar
+// regredir esse fix. Os modos explícitos (Texto/Jogos) não passam por
+// aqui — o que a pessoa escolheu vale como está, em qualquer plataforma.
+function resolveScreenEncodingConfig(mode) {
+  const config = SCREEN_SHARE_MODES[mode] || SCREEN_SHARE_MODES.auto;
+
+  if (mode === "auto" && isElectronDesktop()) {
+    return { ...config, contentHint: "motion", degradationPreference: "maintain-framerate" };
+  }
+
+  return config;
+}
+
+// Aplica bitrate máximo + preferência de degradação no sender de um peer
+// específico — precisa ser chamado UMA VEZ POR PEER (cada um tem seu
+// próprio RTCRtpSender pra essa mesma track local), tanto ao começar a
+// compartilhar quanto quando alguém novo entra enquanto já tem
+// compartilhamento ativo (ver createPeer) ou quando o modo muda em tempo
+// real (ver changeScreenMode).
+async function applyScreenSenderParams(sender, mode) {
+  if (!sender) return;
+
+  const config = resolveScreenEncodingConfig(mode);
+
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}];
+    }
+    params.encodings[0].maxBitrate = config.maxBitrate || undefined;
+    params.degradationPreference = config.degradationPreference;
+    await sender.setParameters(params);
+  } catch (error) {
+    console.error("[screen-share] falha ao aplicar parâmetros de encoding", error);
+  }
+}
 
 // O TURN não usa mais credencial fixa embutida no bundle (ela nunca
 // mudaria e ficaria visível pra sempre no JS público). Em vez disso, busca
@@ -121,6 +194,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
   const screenAppAudioActiveRef = useRef(false);
   const turnServerRef = useRef(null);
   const screenQualityRef = useRef(getPreferredScreenQuality());
+  const screenModeRef = useRef(getPreferredScreenShareMode());
   // Guarda o último "compartilhando tela?" conhecido de cada participante
   // remoto, só pra saber se um media-state é uma mudança de verdade (toca o
   // som) ou só o servidor confirmando um estado que já era esse.
@@ -168,6 +242,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
   // que a chamada caiu, em vez de um "conexão perdida" genérico.
   const [moderationAction, setModerationAction] = useState(null);
   const [screenQuality, setScreenQuality] = useState(screenQualityRef.current);
+  const [screenMode, setScreenMode] = useState(screenModeRef.current);
   const autoEnableMicRef = useRef(getPreferredMicEnabled());
 
   const changeScreenQuality = useCallback((quality) => {
@@ -175,6 +250,27 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
     screenQualityRef.current = next;
     setScreenQuality(next);
     setPreferredScreenQuality(next);
+  }, []);
+
+  // Diferente da resolução (precisa reiniciar a captura pra valer, por
+  // isso o seletor de resolução fica desabilitado enquanto compartilha),
+  // o MODO só ajusta comportamento do encoder numa track/sender que já
+  // existe — dá pra trocar em tempo real, sem parar de compartilhar.
+  const changeScreenMode = useCallback((mode) => {
+    const next = SCREEN_SHARE_MODES[mode] ? mode : "auto";
+    screenModeRef.current = next;
+    setScreenMode(next);
+    setPreferredScreenShareMode(next);
+
+    const track = screenStreamRef.current?.getVideoTracks()?.[0];
+    if (!track) return;
+
+    const config = resolveScreenEncodingConfig(next);
+    track.contentHint = config.contentHint;
+
+    peersRef.current.forEach((peer) => {
+      if (peer.screenSender) applyScreenSenderParams(peer.screenSender, next);
+    });
   }, []);
 
   const setSpeaking = useCallback((id, speaking) => {
@@ -449,6 +545,11 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
     const screenTrack = screenStreamRef.current?.getVideoTracks()?.[0];
     if (screenTrack) {
       peer.screenSender = pc.addTrack(screenTrack, screenStreamRef.current);
+      // Quem entra com o compartilhamento já rolando também precisa do
+      // bitrate/degradação do modo atual — sem isso, esse peer específico
+      // ficaria com os parâmetros padrão do navegador em vez do que foi
+      // escolhido (ver applyScreenSenderParams).
+      applyScreenSenderParams(peer.screenSender, screenModeRef.current);
     }
 
     const screenAudioTrack = screenStreamRef.current?.getAudioTracks()?.[0];
@@ -1122,24 +1223,11 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
       const track = stream.getVideoTracks()[0];
       let audioTrack = stream.getAudioTracks()[0];
 
-      // Só no app desktop Electron: sem aceleração de hardware disponível
-      // pro encoder tão facilmente quanto num navegador normal, o encoder
-      // recorre a "maintain-resolution" (o padrão) com mais frequência lá,
-      // e o efeito observado era "perde FPS". "motion" faz o RTCRtpSender
-      // usar degradationPreference "maintain-framerate" automaticamente
-      // (ver MediaStreamTrack Content Hints, W3C): quando aperta, reduz
-      // resolução antes de derrubar frames.
-      //
-      // Só pro Electron mesmo: aplicar isso também no navegador (onde o
-      // compartilhamento já funcionava bem) fazia o vídeo começar borrado
-      // no primeiro compartilhamento (o encoder força uma resolução baixa
-      // logo de cara, antes da estimativa de banda/CPU se estabilizar, e
-      // some só recomeçando o compartilhamento) — o navegador já teria
-      // "maintain-resolution" (ou perto disso) como comportamento padrão
-      // pra conteúdo de tela, que é o que queremos lá.
-      if (isElectronDesktop()) {
-        track.contentHint = "motion";
-      }
+      // Dica de conteúdo (texto/movimento/nenhuma) pro codec — ver
+      // SCREEN_SHARE_MODES/resolveScreenEncodingConfig no topo do arquivo.
+      // bitrate/degradação vão pro sender de cada peer só depois de criado
+      // (ver o forEach logo abaixo e applyScreenSenderParams).
+      track.contentHint = resolveScreenEncodingConfig(screenModeRef.current).contentHint;
 
       // No app desktop Electron, compartilhar uma janela específica (não a
       // tela inteira) não usa o loopback de áudio do sistema inteiro — ver
@@ -1168,6 +1256,7 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
         } else {
           peer.screenSender.replaceTrack(track).catch(console.error);
         }
+        applyScreenSenderParams(peer.screenSender, screenModeRef.current);
 
         if (audioTrack) {
           if (!peer.screenAudioSender) {
@@ -1261,6 +1350,8 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
     toggleMicrophone,
     screenQuality,
     changeScreenQuality,
+    screenMode,
+    changeScreenMode,
     toggleScreenShare,
     sendMessage,
     moderateParticipant,
