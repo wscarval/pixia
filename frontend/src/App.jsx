@@ -1102,6 +1102,18 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
     avatarUrl: currentUser?.avatarUrl || undefined,
   });
 
+  // Rótulo do botão-gatilho do popover de microfone (ver "Qualidade da
+  // transmissão"/resolução, mesmo padrão visual): mostra o nome do
+  // dispositivo selecionado, incluindo fontes de áudio de app no Electron.
+  const micTriggerLabel = !selectedAudioInputId
+    ? "Microfone padrão"
+    : selectedAudioInputId.startsWith(ELECTRON_APP_PREFIX)
+      ? appAudioSources.find(
+          (source) => `${ELECTRON_APP_PREFIX}${source.pid}` === selectedAudioInputId
+        )?.name || "Áudio de um app"
+      : audioInputDevices.find((device) => device.deviceId === selectedAudioInputId)?.label ||
+        "Microfone";
+
   // O roomToken guardado (ou o cadastro pra reentrada automática após um F5)
   // não vale mais para uma sala particular: volta pra tela de senha.
   useEffect(() => {
@@ -1784,28 +1796,81 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               {deafened ? <HeadphoneOff size={21} /> : <Headphones size={21} />}
             </button>
 
-            <select
-              className="device-select"
-              value={selectedAudioInputId}
-              onChange={(event) => changeAudioInput(event.target.value)}
-              title="Escolher microfone"
-            >
-              <option value="">Microfone padrão</option>
-              {audioInputDevices.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Entrada de áudio ${index + 1}`}
-                </option>
-              ))}
-              {appAudioSources.length > 0 ? (
-                <optgroup label="Áudio de um app (desktop)">
-                  {appAudioSources.map((source) => (
-                    <option key={source.pid} value={`${ELECTRON_APP_PREFIX}${source.pid}`}>
-                      {source.name}
-                    </option>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="device-select inline-flex items-center justify-center gap-1.5"
+                  type="button"
+                  title="Escolher microfone"
+                >
+                  <Mic size={13} />
+                  <span className="min-w-0 truncate">{micTriggerLabel}</span>
+                </button>
+              </PopoverTrigger>
+              {/* w-auto (não w-72 fixo como os outros popovers): nome de dispositivo
+                  de áudio varia muito (alguns bem compridos, tipo "Microfone do
+                  Headset (4- Astro MixAmp Pro Voice)") — largura fixa cortava esse
+                  texto pra fora do painel. Cresce com o conteúdo até max-w-sm; só
+                  além disso (nome realmente extremo) o truncate abaixo entra como
+                  rede de segurança. */}
+              <PopoverContent align="start" className="w-auto max-w-md">
+                <PopoverTitle>Microfone</PopoverTitle>
+                <RadioGroup
+                  value={selectedAudioInputId}
+                  onValueChange={changeAudioInput}
+                  className="mt-1.5"
+                >
+                  {/* id="mic-device-fallback-option", não "mic-device-choice-default": o
+                      Chrome/Windows costuma reportar um dispositivo de verdade com
+                      deviceId literalmente "default" (dispositivo padrão do sistema) —
+                      um id tipo "mic-device-choice-default" colidiria com esse abaixo e
+                      quebraria o htmlFor (dois elementos com o mesmo id no DOM). */}
+                  <label
+                    htmlFor="mic-device-fallback-option"
+                    className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md p-1.5 hover:bg-accent"
+                  >
+                    <RadioGroupItem id="mic-device-fallback-option" value="" />
+                    <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                      Microfone padrão
+                    </span>
+                  </label>
+                  {audioInputDevices.map((device, index) => (
+                    <label
+                      key={device.deviceId}
+                      htmlFor={`mic-device-choice-${device.deviceId}`}
+                      className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md p-1.5 hover:bg-accent"
+                    >
+                      <RadioGroupItem id={`mic-device-choice-${device.deviceId}`} value={device.deviceId} />
+                      <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                        {device.label || `Entrada de áudio ${index + 1}`}
+                      </span>
+                    </label>
                   ))}
-                </optgroup>
-              ) : null}
-            </select>
+                  {appAudioSources.length > 0 ? (
+                    <>
+                      <div className="mt-2 mb-1 px-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                        Áudio de um app (desktop)
+                      </div>
+                      {appAudioSources.map((source) => (
+                        <label
+                          key={source.pid}
+                          htmlFor={`mic-device-app-${source.pid}`}
+                          className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md p-1.5 hover:bg-accent"
+                        >
+                          <RadioGroupItem
+                            id={`mic-device-app-${source.pid}`}
+                            value={`${ELECTRON_APP_PREFIX}${source.pid}`}
+                          />
+                          <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                            {source.name}
+                          </span>
+                        </label>
+                      ))}
+                    </>
+                  ) : null}
+                </RadioGroup>
+              </PopoverContent>
+            </Popover>
 
             <Popover>
               <PopoverTrigger asChild>
@@ -1943,7 +2008,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               <div className="chat-locked">
                 <Lock size={14} />
                 <span>
-                  Somente usuário logados podem enviar mensagens.{" "}
+                  Somente usuários logados podem enviar mensagens.{" "}
                   <button type="button" onClick={() => onNavigate("/cadastro")}>
                     Criar conta
                   </button>{" "}
