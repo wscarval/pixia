@@ -101,6 +101,15 @@ const SCREEN_SHARE_MODE_OPTIONS = [
   { id: "motion", label: "Jogos e vídeo", description: "Mais fluidez para movimento" },
 ];
 
+// Resolução/FPS da captura de tela (exige reiniciar o compartilhamento pra
+// trocar, por isso o seletor fica desabilitado enquanto screenSharing=true —
+// diferente do modo acima, que se aplica ao vivo).
+const SCREEN_QUALITY_OPTIONS = [
+  { id: "720p30", label: "720p · 30 FPS", description: "Mais leve, ideal pra conexões mais fracas" },
+  { id: "1080p60", label: "1080p · 60 FPS", description: "Bom equilíbrio entre nitidez e fluidez" },
+  { id: "1440p60", label: "1440p · 60 FPS", description: "Nitidez máxima, exige mais banda" },
+];
+
 // Conteúdo de marketing/SEO da landing page (só no navegador, ver Landing).
 // Cada item descreve algo que o app realmente faz, em texto curto, com uma
 // piscadela pro tema de gato do Pixia (avatar, nome de visitante etc.).
@@ -133,7 +142,7 @@ const LANDING_HIGHLIGHTS = [
   {
     icon: Wifi,
     title: "Conexão segura",
-    description: "Chamadas em WebRTC, criptografadas de ponta a ponta. Seguro que nem gato em caixa de papelão.",
+    description: "Chamadas em WebRTC, criptografadas de ponta a ponta.",
   },
 ];
 
@@ -1830,21 +1839,42 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
               </PopoverContent>
             </Popover>
 
-            <select
-              className="device-select"
-              value={screenQuality}
-              onChange={(event) => changeScreenQuality(event.target.value)}
-              disabled={screenSharing}
-              title={
-                screenSharing
-                  ? "Pare o compartilhamento pra trocar a qualidade"
-                  : "Qualidade do compartilhamento de tela"
-              }
-            >
-              <option value="720p30">720p · 30 FPS</option>
-              <option value="1080p60">1080p · 60 FPS</option>
-              <option value="1440p60">1440p · 60 FPS</option>
-            </select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="device-select inline-flex items-center justify-center gap-1.5"
+                  type="button"
+                  disabled={screenSharing}
+                  title={
+                    screenSharing
+                      ? "Pare o compartilhamento pra trocar a qualidade"
+                      : "Qualidade do compartilhamento de tela"
+                  }
+                >
+                  <Maximize2 size={13} />
+                  {SCREEN_QUALITY_OPTIONS.find((option) => option.id === screenQuality)?.label ||
+                    "720p · 30 FPS"}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72">
+                <PopoverTitle>Resolução do compartilhamento</PopoverTitle>
+                <RadioGroup value={screenQuality} onValueChange={changeScreenQuality} className="mt-1.5">
+                  {SCREEN_QUALITY_OPTIONS.map((option) => (
+                    <label
+                      key={option.id}
+                      htmlFor={`screen-quality-${option.id}`}
+                      className="flex cursor-pointer items-start gap-2.5 rounded-md p-1.5 hover:bg-accent"
+                    >
+                      <RadioGroupItem id={`screen-quality-${option.id}`} value={option.id} className="mt-0.5" />
+                      <span className="grid gap-0.5">
+                        <span className="text-sm font-medium text-foreground">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </PopoverContent>
+            </Popover>
 
             <button
               className={`share-control ${screenSharing ? "sharing" : ""}`}
