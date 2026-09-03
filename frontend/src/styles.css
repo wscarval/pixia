@@ -1290,6 +1290,49 @@ button {
     border-color: transparent;
   }
 
+  /* Rodapé do card já revelado: só existe pra voltar a borrar a transmissão
+     (ver ShareCard/hideShare) — sem isso, uma vez que a pessoa clica em
+     "Começar a assistir" não tinha jeito de parar depois. Só aparece no
+     hover: fixo, ficava em cima da transmissão o tempo todo. */
+  .share-stop-bar {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    display: flex;
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+  }
+
+  .share-card:hover .share-stop-bar,
+  .share-stop-bar:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .share-stop-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(20, 20, 24, 0.72);
+    backdrop-filter: blur(8px);
+    color: #e4e4e7;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .share-stop-button:hover {
+    background: rgba(239, 68, 68, 0.85);
+    border-color: transparent;
+    color: #fafafa;
+  }
+
   .live-dot {
     flex-shrink: 0;
     width: 6px;

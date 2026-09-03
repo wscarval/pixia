@@ -6,9 +6,11 @@ import {
   Clock,
   Copy,
   Crown,
+  EyeOff,
   Globe,
   HeadphoneOff,
   Headphones,
+  Laptop,
   LayoutGrid,
   Link2,
   Loader2,
@@ -97,6 +99,65 @@ const SCREEN_SHARE_MODE_OPTIONS = [
   { id: "auto", label: "Automático", description: "Recomendado para a maioria dos casos" },
   { id: "detail", label: "Texto e trabalho", description: "Mais nitidez para textos e telas" },
   { id: "motion", label: "Jogos e vídeo", description: "Mais fluidez para movimento" },
+];
+
+// Conteúdo de marketing/SEO da landing page (só no navegador, ver Landing).
+// Cada item descreve algo que o app realmente faz, em texto curto, com uma
+// piscadela pro tema de gato do Pixia (avatar, nome de visitante etc.).
+const LANDING_HIGHLIGHTS = [
+  {
+    icon: MonitorUp,
+    title: "Qualidade que você escolhe",
+    description: "Até 1440p a 60 FPS. Reflexo de gato, não perde um movimento sequer.",
+  },
+  {
+    icon: Crown,
+    title: "Sua sala, suas regras",
+    description: "Quem cria decide quem fica. Bagunçou? Hora de mostrar a garra.",
+  },
+  {
+    icon: MessageSquare,
+    title: "Chat com fotos e histórico",
+    description: "Mensagens com foto, data e hora, guardadas até depois que a galera for embora.",
+  },
+  {
+    icon: Lock,
+    title: "Salas privadas com senha",
+    description: "Território marcado. Ninguém entra sem a senha certa.",
+  },
+  {
+    icon: Laptop,
+    title: "App desktop pra Windows",
+    description: "Mais performance pra chamar e jogar ao mesmo tempo. Ágil que nem gato em cima do teclado.",
+  },
+  {
+    icon: Wifi,
+    title: "Conexão segura",
+    description: "Chamadas em WebRTC, criptografadas de ponta a ponta. Seguro que nem gato em caixa de papelão.",
+  },
+];
+
+const LANDING_FAQ = [
+  {
+    question: "Preciso criar uma conta para usar o Pixia?",
+    answer: "Não. Dá pra gerar uma sala pública e entrar em segundos. Uma conta só é necessária pra salas privadas, foto de perfil ou moderação.",
+  },
+  {
+    question: "O Pixia é gratuito?",
+    answer: "Sim, 100% gratuito. Ronronar também não custa nada.",
+  },
+  {
+    question: "Preciso instalar algum programa?",
+    answer: "Recomendamos o app desktop pra Windows, com melhor performance. Também dá pra usar direto do navegador.",
+  },
+  {
+    question: "A conexão da chamada é segura?",
+    answer: "Sim. As chamadas usam WebRTC, que criptografa áudio e vídeo por padrão.",
+  },
+  {
+    question: "Dá pra compartilhar a tela com áudio?",
+    answer: "Sim, incluindo áudio do sistema ou de uma aba específica, dependendo do navegador ou app desktop.",
+  },
 ];
 
 const MIN_ROOM_PASSWORD_LENGTH = 6;
@@ -197,7 +258,7 @@ function extractRoomSlug(value) {
   return /^[a-zA-Z0-9_-]{1,100}$/.test(trimmed) ? trimmed : null;
 }
 
-function Landing({ onNavigate, currentUser }) {
+function StartRoomCard({ onNavigate, currentUser }) {
   const [creatingPublic, setCreatingPublic] = useState(false);
   const [showPrivateForm, setShowPrivateForm] = useState(false);
   const [privatePassword, setPrivatePassword] = useState("");
@@ -490,6 +551,151 @@ function Landing({ onNavigate, currentUser }) {
   );
 }
 
+// No app desktop, a pessoa já instalou o Pixia de propósito pra entrar direto
+// numa chamada — a landing de marketing ali é ruído, não ajuda em nada, então
+// "/" mostra o cartão funcional (StartRoomCard) direto. No navegador, "/" é a
+// landing de marketing (que também precisa convencer/explicar o produto pra
+// quem chega de uma busca, por exemplo) e o cartão funcional mora em
+// "/comecar", atrás do botão "Começar Agora".
+function Landing({ onNavigate, currentUser }) {
+  if (isElectronDesktop()) {
+    return <StartRoomCard onNavigate={onNavigate} currentUser={currentUser} />;
+  }
+
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: LANDING_FAQ.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: { "@type": "Answer", text: item.answer },
+    })),
+  };
+
+  return (
+    <>
+      <header className="fixed inset-x-0 top-0 z-10 flex items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-2">
+          <img src="/pixia.png" alt="Pixia" className="h-8 w-auto object-contain" />
+        </div>
+        <div className="flex items-center gap-2">
+          {currentUser ? (
+            <Button variant="ghost" onClick={() => onNavigate("/painel")}>
+              Meus links
+            </Button>
+          ) : (
+            <Button variant="ghost" onClick={() => onNavigate("/entrar")}>
+              Entrar
+            </Button>
+          )}
+          <Button onClick={() => onNavigate("/comecar")}>Começar Agora</Button>
+        </div>
+      </header>
+
+      <section className="mx-auto max-w-3xl px-6 pt-28 pb-12 text-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <img src="/favicon.png" alt="" className="h-3.5 w-3.5 object-contain" />
+          Grátis · sem cadastro pra começar
+        </span>
+        <h2 className="mt-5 text-5xl leading-[1.05] font-bold tracking-tight text-foreground sm:text-6xl">
+          Chame os amigos.
+          <br />
+          <span className="text-primary">Fica melhor no app.</span>
+        </h2>
+        <p className="mx-auto mt-5 max-w-lg text-lg leading-relaxed text-muted-foreground">
+          Baixe o app Pixia pra ter a melhor performance chamando e jogando. Ou entre pelo
+          navegador, rápido que nem gato fugindo de banho, sem cadastro.
+        </p>
+        <div className="mt-7 flex flex-wrap justify-center gap-3">
+          <Button size="lg" className="h-11 rounded-xl text-sm" onClick={() => onNavigate("/download")}>
+            Baixar app
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            className="h-11 rounded-xl text-sm"
+            onClick={() => onNavigate("/comecar")}
+          >
+            Entrar pelo navegador
+          </Button>
+        </div>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          {["Até 1440p · 60 FPS", "Chat com histórico", "Moderação da sala"].map((chip) => (
+            <span
+              key={chip}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-muted-foreground"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-5xl px-6 pt-8 pb-16">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {LANDING_HIGHLIGHTS.map((item) => (
+            <div key={item.title} className="rounded-2xl border border-white/8 bg-card/60 p-6">
+              <item.icon size={20} className="text-primary" />
+              <h3 className="mt-3 text-base font-semibold text-foreground">{item.title}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{item.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="border-t border-white/5 bg-card/30">
+        <div className="mx-auto max-w-3xl px-6 py-20">
+          <h2 className="text-center text-3xl font-semibold tracking-tight text-foreground">
+            Perguntas frequentes
+          </h2>
+
+          <div className="mt-8 grid gap-6">
+            {LANDING_FAQ.map((item) => (
+              <div key={item.question}>
+                <h3 className="text-base font-semibold text-foreground">{item.question}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{item.answer}</p>
+              </div>
+            ))}
+          </div>
+
+          <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
+        </div>
+      </section>
+
+      <footer className="border-t border-white/5 px-6 py-10">
+        <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-6 sm:flex-row">
+          <div className="flex items-center gap-2">
+            <img src="/pixia.png" alt="Pixia" className="h-6 w-auto object-contain" />
+            <span className="text-sm text-muted-foreground">
+              © {new Date().getFullYear()} Pixia. Feito com 🐾 e muito café.
+            </span>
+          </div>
+          <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+            <button type="button" className="hover:text-foreground" onClick={() => onNavigate("/download")}>
+              Baixar app
+            </button>
+            {currentUser ? (
+              <button type="button" className="hover:text-foreground" onClick={() => onNavigate("/painel")}>
+                Meus links
+              </button>
+            ) : (
+              <button type="button" className="hover:text-foreground" onClick={() => onNavigate("/entrar")}>
+                Entrar
+              </button>
+            )}
+            <button type="button" className="hover:text-foreground" onClick={() => onNavigate("/termos")}>
+              Termos de Uso
+            </button>
+            <button type="button" className="hover:text-foreground" onClick={() => onNavigate("/privacidade")}>
+              Política de Privacidade
+            </button>
+          </nav>
+        </div>
+      </footer>
+    </>
+  );
+}
+
 function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
   // Nome custom é privilégio de quem tem conta (e só muda em /conta). Quem
   // não está logado entra com um nome de visitante sorteado, sem campo pra
@@ -732,9 +938,12 @@ function JoinRoom({ roomId, onJoin, onNavigate, currentUser }) {
 // Transmissão de outra pessoa começa borrada — só quem está vendo decide
 // quando quer parar o que está fazendo pra prestar atenção (a própria
 // transmissão de quem compartilha nunca passa por isso, é só pra quem
-// assiste). Ver revealedShares/revealShare em Room.
-function ShareCard({ share, muted, volume, revealed, onReveal }) {
+// assiste). Ver revealedShares/revealShare/hideShare em Room. Uma vez
+// revelada, um botão no rodapé do card deixa voltar a ficar borrada
+// (onHide) — sem isso não tinha como "parar de assistir" depois de começar.
+function ShareCard({ share, muted, volume, revealed, onReveal, onHide }) {
   const gated = !share.local && !revealed;
+  const canStopWatching = !share.local && revealed;
 
   return (
     <article className={`share-card${gated ? " gated" : ""}`}>
@@ -744,6 +953,14 @@ function ShareCard({ share, muted, volume, revealed, onReveal }) {
           <button type="button" className="share-gate-button" onClick={onReveal}>
             <Play size={20} />
             Começar a assistir
+          </button>
+        </div>
+      ) : null}
+      {canStopWatching ? (
+        <div className="share-stop-bar">
+          <button type="button" className="share-stop-button" onClick={onHide}>
+            <EyeOff size={14} />
+            Parar de assistir
           </button>
         </div>
       ) : null}
@@ -1023,6 +1240,18 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
       if (current.has(shareId)) return current;
       const next = new Set(current);
       next.add(shareId);
+      return next;
+    });
+  }
+
+  // Volta a transmissão pro estado borrado (botão "Parar de assistir" no
+  // rodapé do card já revelado). Clicar em "Começar a assistir" de novo
+  // revela outra vez.
+  function hideShare(shareId) {
+    setRevealedShares((current) => {
+      if (!current.has(shareId)) return current;
+      const next = new Set(current);
+      next.delete(shareId);
       return next;
     });
   }
@@ -1497,6 +1726,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
                         volume={deafened ? 0 : screenShareVolume}
                         revealed={revealedShares.has(share.id)}
                         onReveal={() => revealShare(share.id)}
+                        onHide={() => hideShare(share.id)}
                       />
                     ))}
                   </div>
@@ -1510,6 +1740,7 @@ function Room({ roomId, name, roomToken, currentUser, onLeave, onNeedsPassword, 
                         volume={deafened ? 0 : screenShareVolume}
                         revealed={revealedShares.has(focusedShare.id)}
                         onReveal={() => revealShare(focusedShare.id)}
+                        onHide={() => hideShare(focusedShare.id)}
                       />
                     ) : null}
                   </div>
@@ -1749,6 +1980,7 @@ const SPECIAL_ROUTES = [
   "/termos",
   "/privacidade",
   "/download",
+  "/comecar",
 ];
 
 export default function App() {
@@ -1849,6 +2081,10 @@ export default function App() {
 
   if (pathname === "/download") {
     return <DownloadApp onNavigate={navigate} />;
+  }
+
+  if (pathname === "/comecar") {
+    return <StartRoomCard onNavigate={navigate} currentUser={currentUser} />;
   }
 
   if (pathname === "/cadastro") {

@@ -855,6 +855,30 @@ export default function useRoomWebRTC({ roomId, name, roomToken, avatarId, avata
           existing.forEach((participant) => {
             createPeer(participant.id);
           });
+
+          // Reconexão do socket.io (queda/oscilação de rede) faz o servidor
+          // tratar isso como um join do zero: screenSharing/micEnabled do
+          // socket.data voltam pro padrão "false" (ver join-room no backend)
+          // e é isso que ele rebroadcasta pros outros em "user-joined" — não
+          // existe memória do estado anterior no servidor. Só que aqui do
+          // lado do cliente a captura de tela/mic (screenStreamRef/
+          // microphoneStreamRef) nunca parou: createPeer acima já reanexou
+          // a track de tela nas novas RTCPeerConnection automaticamente.
+          // Resultado sem isto: o vídeo volta a fluir pros outros
+          // participantes, mas a UI deles filtra por participant.screenSharing
+          // (ver activeShares em App.jsx) — que ficou preso em "false" — daí
+          // a transmissão "some" pra eles enquanto quem compartilha (cujo
+          // estado local nunca foi tocado por esse ciclo) não percebe nada.
+          // Reemitir aqui o estado real corrige o socket.data no servidor e
+          // faz ele rebroadcastar a informação certa pro resto da sala.
+          const stillSharingScreen = Boolean(screenStreamRef.current?.getVideoTracks()?.[0]);
+          const micTrack = microphoneStreamRef.current?.getAudioTracks()?.[0];
+          if (stillSharingScreen || micTrack) {
+            socket.emit("media-state", {
+              screenSharing: stillSharingScreen,
+              micEnabled: micTrack ? micTrack.enabled : undefined,
+            });
+          }
         }
       );
     });

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /painel
+Disallow: /conta
+Disallow: /r/
+
+Sitemap: https://pixiaart.com/sitemap.xml
